@@ -50,6 +50,13 @@ pub fn caption_missing(root: &Path, reader: &SettingsReader, settings: &WorkSett
     let db = ProjectDbTarget::for_project(reader, settings)?;
     let project = db.uri().to_string();
     let done = qnc_shot_captions::captioned(root, &model, &project)?;
+    // A clip's poster stands for it only until its shots are analysed: while the analysis is on and
+    // the clip not analysed yet, its poster is not described (live 2026-11-12: 30 posters described
+    // first, 4.5 s each, and then described again as the shots of the analysis).
+    let analysing = settings.ai_feature(qnc_ai_features::SHOT_ANALYSIS).unwrap_or(false);
+    let analysed: std::collections::HashSet<String> =
+        if analysing { qnc_shot_db::read_analysed(&db).map_err(|e| e.to_string())?.into_iter().collect() } else { Default::default() };
+    let wait_for_shots = |clip_id: &str, kind: &str| analysing && kind == "poster" && !analysed.contains(clip_id);
     let project_dir = reader.local_workspace_dir(settings).map_err(|e| e.to_string())?;
     let output_root = format!("{}/", settings.output_root_uri.trim_end_matches('/'));
     let local = |uri: &str| match (uri.strip_prefix(&output_root), &project_dir) {
@@ -64,7 +71,7 @@ pub fn caption_missing(root: &Path, reader: &SettingsReader, settings: &WorkSett
         })
         .filter_map(|(clip_id, part)| {
             let key = qnc_shot_captions::key(&project, &clip_id, part.from, part.to);
-            if part.poster.is_empty() || done.contains(&key) {
+            if part.poster.is_empty() || done.contains(&key) || wait_for_shots(&clip_id, &part.kind) {
                 return None;
             }
             let poster = local(&part.poster)?;
