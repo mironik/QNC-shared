@@ -14,5 +14,4 @@ qnc-shot-analysis = { workspace = true }
 qnc-shot-caption = { workspace = true }
 qnc-shot-captions = { workspace = true }
 qnc-shot-content-db = { workspace = true }
-qnc-shot-db = { workspace = true }
 qnc-work-settings = { workspace = true }

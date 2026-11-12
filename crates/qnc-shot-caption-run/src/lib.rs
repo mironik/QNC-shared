@@ -50,21 +50,24 @@ pub fn caption_missing(root: &Path, reader: &SettingsReader, settings: &WorkSett
     let db = ProjectDbTarget::for_project(reader, settings)?;
     let project = db.uri().to_string();
     let done = qnc_shot_captions::captioned(root, &model, &project)?;
-    // A clip's poster stands for it only until its shots are analysed: while the analysis is on and
-    // the clip not analysed yet, its poster is not described (live 2026-11-12: 30 posters described
-    // first, 4.5 s each, and then described again as the shots of the analysis).
+    // A clip's poster stands for it only until its shots are analysed and looked at: with the
+    // analysis on a poster is never described (live 2026-11-12: posters described first, 4.5 s
+    // each, and then the same clips again as their shots).
     let analysing = settings.ai_feature(qnc_ai_features::SHOT_ANALYSIS).unwrap_or(false);
-    let analysed: std::collections::HashSet<String> =
-        if analysing { qnc_shot_db::read_analysed(&db).map_err(|e| e.to_string())?.into_iter().collect() } else { Default::default() };
-    let wait_for_shots = |clip_id: &str, kind: &str| analysing && kind == "poster" && !analysed.contains(clip_id);
+    let wait_for_shots = |_clip_id: &str, kind: &str| analysing && kind == "poster";
     let project_dir = reader.local_workspace_dir(settings).map_err(|e| e.to_string())?;
     let output_root = format!("{}/", settings.output_root_uri.trim_end_matches('/'));
     let local = |uri: &str| match (uri.strip_prefix(&output_root), &project_dir) {
         (Some(relative), Some(dir)) if !relative.contains("..") => Some(dir.join(relative)).filter(|file| file.is_file()),
         _ => local_media(uri),
     };
+    // A clip whose usable parts still wait for their fine look is described once that is done:
+    // the fine look gives its shots their final pictures (live 2026-11-12: a clip described with
+    // one shot and again with three).
+    let fine_comes = content_engine.pictures > 1;
     let mut wanted: Vec<Wanted> = qnc_shot_content_db::read_all(&db, &content_engine.model_name())?
         .into_iter()
+        .filter(|clip| !(fine_comes && clip.parts.iter().any(|part| !part.fine && matches!(part.kind.as_str(), "steady" | "pan"))))
         .flat_map(|clip| {
             let clip_id = clip.clip_id;
             clip.parts.into_iter().map(move |part| (clip_id.clone(), part))
