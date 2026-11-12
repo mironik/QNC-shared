@@ -201,6 +201,11 @@ pub fn show_timeline_dock_with(
                 .size(style.font_ui),
         );
         ui.add_space(10.0);
+        // The timecode of the playhead first (user 2026-11-12: "trebao bi davati timecode
+        // playholdera, a ne trajanje; ono može biti informacija; za izjave je bitan timecode").
+        if let (Some(playhead), Some(tc)) = (timeline.projection.playhead_frame, timeline.timecode.as_ref()) {
+            mark_label(ui, style, "TC", &tc.label(playhead));
+        }
         if let Some((start, end)) = timeline.projection.visible_source_marks() {
             let length = timeline.projection.shown_source_length((start, end));
             let [start, end, length] = match timeline.timecode {
