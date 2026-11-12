@@ -98,6 +98,7 @@ qnc-image-assets = { path = "crates/qnc-image-assets" }
 qnc-import-fit = { path = "crates/qnc-import-fit" }
 qnc-ingest-cameras = { path = "crates/qnc-ingest-cameras" }
 qnc-ingest-catalog = { path = "crates/qnc-ingest-catalog" }
+qnc-base-cards = { path = "crates/qnc-base-cards" }
 qnc-ingest-pieces = { path = "crates/qnc-ingest-pieces" }
 qnc-ingest-selection-write = { path = "crates/qnc-ingest-selection-write" }
 qnc-ingest-store = { path = "crates/qnc-ingest-store" }

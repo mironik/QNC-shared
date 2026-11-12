@@ -379,6 +379,31 @@ pub fn clip_timing_on(conn: &Connection, clip_id: &str) -> Result<Option<(u64, (
     }))
 }
 
+/// The sources a catalog's clips were Selected from (the card or folder Select read) with how
+/// many clips each, read only from the database file `file` (an Ingest base the tray made, user
+/// 2026-11-12: classic QNC treats it as a card). Empty when the file has no clip catalog.
+pub fn sources_of_file(file: &std::path::Path) -> Result<Vec<(String, usize)>, String> {
+    if !file.is_file() {
+        return Err(qnc_ui_text::text("db.project_database_longer_exists").to_string());
+    }
+    let conn = Connection::open_with_flags(file, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|error| error.to_string())?;
+    conn.busy_timeout(Duration::from_secs(5)).map_err(|error| error.to_string())?;
+    if !has_view(&conn, "public_clips")? {
+        return Ok(Vec::new());
+    }
+    let camera = camera_only(&conn)?;
+    let mut statement = conn
+        .prepare(&format!(
+            "SELECT source_uri, count(*) FROM public_clips WHERE source_uri IS NOT NULL {camera}
+             GROUP BY source_uri ORDER BY source_uri"
+        ))
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as usize)))
+        .map_err(|error| error.to_string())?;
+    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|error| error.to_string())
+}
+
 /// The stored media of clip `clip_id`: its original and, when it has one, its proxy
 /// (QNC URIs), on a connection another public module holds. `None`: not in it.
 pub fn media_uris_on(

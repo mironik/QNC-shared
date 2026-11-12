@@ -18,8 +18,90 @@ pub const VERSION: &str = "0.1.0";
 pub enum Step {
     /// The roots of `local`, `lan` or `intranet`.
     Roots(String),
+    /// The cards of the Ingest bases the tray made in the folder of the bases of the QNC root
+    /// given (user 2026-11-12: a base is taken as a card). An entry is the card it was Selected
+    /// from: it opens and Selects as any card of the sources.
+    Bases(std::path::PathBuf),
     Parent,
     Open(String),
+}
+
+/// The catalog actions of the tabs of the browser (the keys of the form's catalog).
+pub mod kind_actions {
+    pub const LOCAL: &str = "ingest_source_kind_local";
+    pub const LAN: &str = "ingest_source_kind_lan";
+    pub const INTERNET: &str = "ingest_source_kind_internet";
+    /// The Ingest bases the tray made, each card of them taken as a card (user 2026-11-12).
+    pub const BASES: &str = "ingest_source_kind_bases";
+}
+
+/// The tabs of the browser: the kinds of sources, and the bases the tray made.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SourceKind {
+    #[default]
+    Local,
+    Lan,
+    Internet,
+    Bases,
+}
+
+impl SourceKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Local => qnc_ui_text::text("source.computer"),
+            Self::Lan => "LAN",
+            Self::Internet => "Internet",
+            Self::Bases => qnc_ui_text::text("source.bases"),
+        }
+    }
+
+    pub fn action_id(self) -> &'static str {
+        match self {
+            Self::Local => kind_actions::LOCAL,
+            Self::Lan => kind_actions::LAN,
+            Self::Internet => kind_actions::INTERNET,
+            Self::Bases => kind_actions::BASES,
+        }
+    }
+
+    /// The word of the kind in the records of a source.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Lan => "lan",
+            Self::Internet => "internet",
+            Self::Bases => "bases",
+        }
+    }
+
+    /// The step that lists the roots of the tab: the sources of the environment, or the cards of
+    /// the bases of the QNC root (none without a root: the empty list).
+    pub fn roots(self, qnc_root: Option<&std::path::Path>) -> Step {
+        match (self, qnc_root) {
+            (Self::Bases, Some(root)) => Step::Bases(root.to_path_buf()),
+            (Self::Internet, _) => Step::Roots("intranet".into()),
+            _ => Step::Roots(self.id().into()),
+        }
+    }
+}
+
+/// The cards of the bases as the roots of the browser: the base, the card and how many clips;
+/// a card not attached now says so.
+fn bases(session: &TransportBrowserSession, root: &std::path::Path) -> Result<BrowseState, String> {
+    let listed = qnc_base_cards::cards(root)?;
+    let entries = listed
+        .cards
+        .iter()
+        .map(|card| {
+            let name = card.source_uri.rsplit('/').next().unwrap_or(&card.source_uri);
+            let volume = match session.selected(&card.source_uri) {
+                Some(_) => format!("{name} · {}", card.clips),
+                None => qnc_ui_text::fill("source.base_card_missing", &[("card", name)]),
+            };
+            BrowseLocationEntry { name: card.base.clone(), qnc_uri: card.source_uri.clone(), serial_number: String::new(), volume_name: volume }
+        })
+        .collect();
+    Ok(BrowseState { roots: true, entries, ..BrowseState::default() })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -221,11 +303,11 @@ impl SourceBrowse {
             .name("source-browse".into())
             .spawn(move || {
                 let state = match step {
-                    Step::Roots(environment) => session.roots(&environment),
-                    Step::Parent => session.parent(),
-                    Step::Open(uri) => session.open(&uri),
-                }
-                .map(Into::into);
+                    Step::Roots(environment) => session.roots(&environment).map(Into::into),
+                    Step::Bases(root) => bases(&session, &root),
+                    Step::Parent => session.parent().map(Into::into),
+                    Step::Open(uri) => session.open(&uri).map(Into::into),
+                };
                 let _ = send.send((session, state));
             })
             .map_err(|error| error.to_string())?;
