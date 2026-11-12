@@ -6315,11 +6315,13 @@ dependencies = [
  "core-foundation 0.9.4",
  "hostname",
  "io-kit-sys 0.4.1",
+ "libc",
  "qnc-contracts",
  "serde",
  "serde_json",
  "smbios-lib",
  "whoami",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

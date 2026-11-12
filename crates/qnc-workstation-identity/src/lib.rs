@@ -3,9 +3,12 @@
 
 use serde::{Deserialize, Serialize};
 
+mod administrator;
 mod platform;
 #[cfg(any(windows, target_os = "linux"))]
 mod smbios;
+
+pub use administrator::is_administrator;
 
 pub const CONTRACT_VERSION: &str = "0.1.0";
 pub const MANIFEST: &str =
