@@ -97,6 +97,39 @@ pub enum ImportedCopy {
     Proxy,
 }
 
+impl StoredClip {
+    /// The record a reader of the media works from (user 2026-11-12: "cijeli projekt mora
+    /// sljediti postavke"): when the import copied the clip into the project, the copy stands for
+    /// the representation it copies (same streams, timing and channels, nothing probed again),
+    /// so the filmstrip and the wave read the project, not the card. Media linked where it is
+    /// keeps the saved record.
+    pub fn snapshot_to_read(&self) -> Snapshot {
+        let saved = &self.clip.snapshot;
+        let (Some(imported), Some(copy)) = (self.imported_media_uri.as_ref(), self.imported_copy_of) else {
+            return saved.clone();
+        };
+        let copied = match copy {
+            ImportedCopy::Original => Some(saved.binding.original_uri.clone()),
+            ImportedCopy::Proxy => saved.binding.proxy_uri.clone(),
+        };
+        let Some(copied) = copied.filter(|copied| copied != imported) else {
+            return saved.clone();
+        };
+        let mut snapshot = saved.clone();
+        let metadata = &mut snapshot.metadata;
+        for uri in [Some(&mut snapshot.binding.original_uri), snapshot.binding.proxy_uri.as_mut(), Some(&mut metadata.original.media_uri), metadata.proxy.as_mut().map(|proxy| &mut proxy.media_uri)]
+            .into_iter()
+            .flatten()
+            .chain(metadata.evidence.iter_mut().map(|evidence| &mut evidence.media_uri))
+        {
+            if *uri == copied {
+                *uri = imported.clone();
+            }
+        }
+        snapshot
+    }
+}
+
 impl ImportedCopy {
     pub fn as_str(self) -> &'static str {
         match self {
