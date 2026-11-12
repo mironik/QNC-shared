@@ -112,6 +112,10 @@ pub struct ProductLocations {
     /// The recorded voice-overs of the script (user 2026-10-28); a project made before it has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice: Option<String>,
+    /// The posters of the shots the AI looked at (user 2026-11-12: "za AI kadrove postere u
+    /// posebnom direktoriju"); a project made before it has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_shots: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -393,6 +397,11 @@ impl WorkSettings {
                     .and_then(|products| products.get("voice"))
                     .map(|_| required_text(saved.get("products").ok_or_else(incomplete)?, "voice"))
                     .transpose()?,
+                ai_shots: saved
+                    .get("products")
+                    .and_then(|products| products.get("ai_shots"))
+                    .map(|_| required_text(saved.get("products").ok_or_else(incomplete)?, "ai_shots"))
+                    .transpose()?,
             },
             input: object(&saved, "input")?,
             playback: object(&saved, "playback")?,
@@ -509,6 +518,15 @@ impl WorkSettings {
             ReadError::new("products_voice", "The project has no voice-over folder (products.voice).")
         })?;
         Ok((project_dir.join(relative), format!("{}/file/{}", self.project_media_source_uri()?, relative.trim_matches('/'))))
+    }
+
+    /// Where the posters of the shots the AI looked at are written in the project folder, and
+    /// their URI; a project made before them has none (a controlled error, no default).
+    pub fn ai_shots_location(&self, project_dir: &Path) -> Result<(PathBuf, String), ReadError> {
+        let relative = self.products.ai_shots.as_deref().ok_or_else(|| {
+            ReadError::new("products_ai_shots", "The project has no folder for the posters of the AI shots (products.ai_shots).")
+        })?;
+        Ok((project_dir.join(relative), format!("{}/{}", self.output_root_uri.trim_end_matches('/'), relative.trim_matches('/'))))
     }
 
     /// The project folder as a media source: media copied into the project (an imported

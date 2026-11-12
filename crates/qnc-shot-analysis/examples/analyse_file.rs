@@ -9,7 +9,7 @@ fn main() {
     let path = std::path::PathBuf::from(args.next().expect("an MXF file"));
     let codec = args.next().unwrap_or_else(|| "h264".into());
     let cancel = AtomicBool::new(false);
-    let pace = qnc_shot_analysis::Pace { player_plays: &|| false, wanted: &|| None, cancel: &cancel };
+    let pace = qnc_shot_analysis::Pace { player_plays: &|| false, wanted: &|| None, takes: &|_| true, cancel: &cancel };
     let started = std::time::Instant::now();
     let found = qnc_shot_analysis::analyse_file("example", &codec, &path, &pace).expect("analysis");
     println!("pictures={} shots={} parts={} ms={}", found.pictures, found.shots.len(), found.parts.len(), started.elapsed().as_millis());

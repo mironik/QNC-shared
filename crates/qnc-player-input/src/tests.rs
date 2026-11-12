@@ -237,6 +237,7 @@ fn settings(context: &str, mode: &str) -> WorkSettings {
             b_roll_virtual_clips: "products/b_roll_virtual_clips".into(),
             prerender: None,
             voice: None,
+            ai_shots: None,
         },
         input: serde_json::json!({"mode":"auto"}),
         playback: serde_json::json!({"input":mode}),

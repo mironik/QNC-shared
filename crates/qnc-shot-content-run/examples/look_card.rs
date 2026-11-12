@@ -19,7 +19,7 @@ fn main() -> Result<(), String> {
     }
     let count = args.get(2).and_then(|n| n.parse().ok()).unwrap_or(engine.pictures);
     let cancel = AtomicBool::new(false);
-    let pace = qnc_shot_analysis::Pace { player_plays: &|| false, wanted: &|| None, cancel: &cancel };
+    let pace = qnc_shot_analysis::Pace { player_plays: &|| false, wanted: &|| None, takes: &|_| true, cancel: &cancel };
     let started = Instant::now();
     let found = qnc_shot_analysis::analyse_file("look-card", codec, path, &pace)?;
     println!("analysis: {} pictures, {} shots, {} parts, {} ms", found.pictures, found.shots.len(), found.parts.len(), started.elapsed().as_millis());

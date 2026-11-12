@@ -63,6 +63,9 @@ pub struct Pace<'a> {
     pub player_plays: &'a dyn Fn() -> bool,
     /// The clip a preview has open, analysed first.
     pub wanted: &'a dyn Fn() -> Option<String>,
+    /// Which clips this turn may look at (user 2026-11-12: a clip whose first channel holds a
+    /// statement is not analysed); `&|_| true` for every clip.
+    pub takes: &'a dyn Fn(&str) -> bool,
     /// The run stops (the project closed, its lease lost).
     pub cancel: &'a AtomicBool,
 }
@@ -81,7 +84,7 @@ pub fn analyse_missing(project: &ShotProject, local_media: &LocalMedia<'_>, leas
     let mut remaining: Vec<String> = catalog
         .summaries()?
         .into_iter()
-        .filter(|clip| clip.imported && !analysed.contains(&clip.clip_id) && !waiting.contains(&clip.clip_id))
+        .filter(|clip| clip.imported && !analysed.contains(&clip.clip_id) && !waiting.contains(&clip.clip_id) && (pace.takes)(&clip.clip_id))
         .map(|clip| clip.clip_id)
         .collect();
     if remaining.is_empty() {

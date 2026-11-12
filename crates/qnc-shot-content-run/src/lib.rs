@@ -83,9 +83,10 @@ pub fn look_missing(reader: &SettingsReader, settings: &WorkSettings, local_medi
         }
         None => stored.map(|set| qnc_shot_content::Texts { vectors: set.labels.into_iter().map(|label| label.vector).collect(), scale: set.scale, bias: set.bias }),
     };
-    // Where the shots' posters go: the project's thumbnails, a folder a clip.
+    // Where the shots' posters go: the folder of the AI shots the project names, a folder a clip
+    // (user 2026-11-12: "za AI kadrove postere u posebnom direktoriju").
     let project_dir = reader.local_workspace_dir(settings).map_err(|e| e.to_string())?.ok_or(qnc_ui_text::text("import.import_needs_local_access_project_folder"))?;
-    let thumbnails = (settings.product_local_dir(&project_dir, qnc_work_settings::ProductArea::Thumbnails), settings.product_uri(qnc_work_settings::ProductArea::Thumbnails));
+    let ai_shots = settings.ai_shots_location(&project_dir).map_err(|e| e.message)?;
     // First quickly, every clip: one picture a shot, its poster (user 2026-11-10); then finely,
     // the usable parts with as many pictures as this host says.
     let mut fine: Vec<String> = if engine.pictures > 1 {
@@ -126,8 +127,8 @@ pub fn look_missing(reader: &SettingsReader, settings: &WorkSettings, local_medi
         };
         let started = Instant::now();
         let looked = if quick {
-            let folder = thumbnails.0.join(&clip_id).join("shots");
-            let base = format!("{}/{clip_id}/shots", thumbnails.1.trim_end_matches('/'));
+            let folder = ai_shots.0.join(&clip_id);
+            let base = format!("{}/{clip_id}", ai_shots.1.trim_end_matches('/'));
             look_file(&clip_id, codec, &path, &units, 1, &engine.model, &client, pace, Some((&folder, &base)))
         } else {
             // Finely: the parts with more pictures; a shot without one keeps its quick look.
