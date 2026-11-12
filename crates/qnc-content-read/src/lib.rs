@@ -416,6 +416,38 @@ pub fn sources_of_file(file: &std::path::Path) -> Result<Vec<(String, usize)>, S
     rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|error| error.to_string())
 }
 
+/// A camera clip of a project database and the original it was Selected from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClipOriginal {
+    pub clip_id: String,
+    pub source_uri: String,
+    pub original_uri: String,
+}
+
+/// Every camera clip of the project database `file` with its source and original (QNC URIs), read
+/// only (user 2026-11-12: a card inserted again is compared with the base that already has it).
+pub fn clip_originals_of_file(file: &std::path::Path) -> Result<Vec<ClipOriginal>, String> {
+    if !file.is_file() {
+        return Err(qnc_ui_text::text("db.project_database_longer_exists").to_string());
+    }
+    let conn = Connection::open_with_flags(file, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|error| error.to_string())?;
+    conn.busy_timeout(Duration::from_secs(5)).map_err(|error| error.to_string())?;
+    if !has_view(&conn, "public_clips")? {
+        return Ok(Vec::new());
+    }
+    let camera = camera_only(&conn)?;
+    let mut statement = conn
+        .prepare(&format!(
+            "SELECT clip_id, source_uri, original_uri FROM public_clips
+             WHERE source_uri IS NOT NULL AND original_uri IS NOT NULL {camera} ORDER BY original_uri"
+        ))
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| Ok(ClipOriginal { clip_id: row.get(0)?, source_uri: row.get(1)?, original_uri: row.get(2)? }))
+        .map_err(|error| error.to_string())?;
+    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|error| error.to_string())
+}
+
 /// The stored media of clip `clip_id`: its original and, when it has one, its proxy
 /// (QNC URIs), on a connection another public module holds. `None`: not in it.
 pub fn media_uris_on(
