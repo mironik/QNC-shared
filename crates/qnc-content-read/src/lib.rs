@@ -379,6 +379,18 @@ pub fn clip_timing_on(conn: &Connection, clip_id: &str) -> Result<Option<(u64, (
     }))
 }
 
+/// The media the import made of clip `clip_id` in the project (a copy of its original or proxy),
+/// on a connection another public module holds. `None`: not imported, linked, or not in it.
+pub fn imported_media_on(conn: &Connection, clip_id: &str) -> Result<Option<String>, String> {
+    if !has_view(conn, "public_clips")? {
+        return Ok(None);
+    }
+    conn.query_row("SELECT imported_media_uri FROM public_clips WHERE clip_id = ?1", [clip_id], |row| row.get::<_, Option<String>>(0))
+        .optional()
+        .map(Option::flatten)
+        .map_err(|error| error.to_string())
+}
+
 /// The sources a catalog's clips were Selected from (the card or folder Select read) with how
 /// many clips each, read only from the database file `file` (an Ingest base the tray made, user
 /// 2026-11-12: classic QNC treats it as a card). Empty when the file has no clip catalog.

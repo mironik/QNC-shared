@@ -196,8 +196,12 @@ impl Store {
         let Some((original_uri, proxy_uri)) = stored_source else {
             return Err(qnc_ui_text::text("db.clip_project_database").into());
         };
+        // The copy the import made in the project is the same medium (user 2026-11-12: the wave
+        // is made from the copy once the card is copied).
+        let imported = qnc_content_read::imported_media_on(&self.conn, &artifact.clip_id)?;
         if artifact.source_uri != original_uri
             && proxy_uri.as_deref() != Some(artifact.source_uri.as_str())
+            && imported.as_deref() != Some(artifact.source_uri.as_str())
         {
             return Err(qnc_ui_text::text("artifact.wave_record_does_belong_stored_original").into());
         }

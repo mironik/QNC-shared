@@ -227,6 +227,15 @@ impl WorkSettings {
             .ok_or_else(|| ReadError::new("audio_reading_words_per_second", "The database holds no valid audio.reading_words_per_second."))
     }
 
+    /// Whether the import copies the clips into the project (`storage.ingest_media` proxy,
+    /// original or optimized with the original). Then only the copy is read from the card: the
+    /// records, posters made from the clip, filmstrips, waves and analyses work from the copy
+    /// (user 2026-11-12: "ostale radnje idu iz kopiranih kadrova; kad se ne kopiraju klipovi sve
+    /// ide sa kartice").
+    pub fn ingest_copies(&self) -> bool {
+        matches!(self.storage.ingest_media.as_str(), "proxy" | "original" | "optimized_original")
+    }
+
     /// Whether AI feature `code` is on in this project (`ai.features`, docs/102: the project
     /// turns on what it wants, QNC works without any). A project without the list is completed
     /// when Project opens it; until then asking is an error, never a guess.
