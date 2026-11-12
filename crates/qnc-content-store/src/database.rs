@@ -397,8 +397,10 @@ impl ContentStore {
                     [IMPORT_LEASE_SECONDS],
                 )
                 .map_err(err)?;
+                // The shortest clip first (live 2026-11-12: six short clips waited behind a 6 GB one;
+                // what is copied first is worked on first).
                 let mut clip = tx.query_row(
-                    &format!("SELECT {} FROM clips WHERE import_status='queued' ORDER BY clip_id LIMIT 1", stored_columns(self.has_copy_of)),
+                    &format!("SELECT {} FROM clips WHERE import_status='queued' ORDER BY COALESCE(duration_frames, 0), clip_id LIMIT 1", stored_columns(self.has_copy_of)),
                     [], row).optional().map_err(err)?;
                 if let Some(clip) = &mut clip {
                     tx.execute(
