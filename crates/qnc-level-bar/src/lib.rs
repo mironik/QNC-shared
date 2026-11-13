@@ -10,14 +10,17 @@ use eframe::egui::{self, PointerButton, Pos2, Rect, Ui, Vec2};
 pub const MODULE_ID: &str = "qnc.module.level-bar";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// The bar's size (as on the Segments bar: the width of its seven middle buttons).
-pub const WIDTH: f32 = 240.0;
-pub const HEIGHT: f32 = 22.0;
-/// The width of NORM, of the sound assistant's AI, of its Keep and the gap before each.
+/// The width of the meter itself (user 2026-11-13: "povećaj prikaz nivoa tona, prekratak je";
+/// it was what NORM, AI and Keep left of 240 px, 78 px), of NORM, of the sound assistant's AI,
+/// of its Keep and the gap before each.
+const METER_W: f32 = 200.0;
 const NORM_W: f32 = 52.0;
 const AI_W: f32 = 34.0;
 const KEEP_W: f32 = 58.0;
 const GAP: f32 = 6.0;
+/// The bar's size: the same in every form (one block).
+pub const WIDTH: f32 = METER_W + GAP + NORM_W + GAP + AI_W + GAP + KEEP_W;
+pub const HEIGHT: f32 = 22.0;
 
 /// The catalog action of a click on NORM (the N key).
 pub const NORMALIZE: &str = "toggle_loudness_normalize";

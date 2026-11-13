@@ -37,6 +37,9 @@ pub struct SourceTimeline<'a> {
     pub wave_over_video: Option<(qnc_timeline::AudioLane, u8)>,
     /// The clip's A1/A2 level curves (user 2026-11-07), drawn in their lanes.
     pub level_curves: Vec<qnc_timeline::TimelineLevelCurve>,
+    /// The frames of the whole clip, when the timeline shows a window of it (a statement
+    /// enlarged): the bar's end timecode is the clip's end, not the window's.
+    pub clip_frames: Option<u64>,
 }
 
 impl<'a> SourceTimeline<'a> {
@@ -60,7 +63,14 @@ impl<'a> SourceTimeline<'a> {
             a2_channel: None,
             wave_over_video: None,
             level_curves: Vec::new(),
+            clip_frames: None,
         }
+    }
+
+    /// The frames of the whole clip (the timeline shows a window of it).
+    pub fn with_clip_frames(mut self, frames: u64) -> Self {
+        self.clip_frames = Some(frames);
+        self
     }
 
     /// The clip's level curves drawn in its A1/A2 lanes.
@@ -91,6 +101,17 @@ impl<'a> SourceTimeline<'a> {
     pub fn with_a2_channel(mut self, choice: Option<qnc_timeline::ChannelChoice>) -> Self {
         self.a2_channel = choice;
         self
+    }
+}
+
+/// A length of `frames` at `fps` as a duration: seconds:frames, from a minute on
+/// minutes:seconds:frames (as the durations of covers and segments).
+fn length_label(frames: u64, fps: u32) -> String {
+    let fps = u64::from(fps.max(1));
+    let (seconds, rest) = (frames / fps, frames % fps);
+    match seconds / 60 {
+        0 => format!("{seconds}:{rest:02}"),
+        minutes => format!("{minutes}:{:02}:{rest:02}", seconds % 60),
     }
 }
 
@@ -201,20 +222,22 @@ pub fn show_timeline_dock_with(
                 .size(style.font_ui),
         );
         ui.add_space(10.0);
-        // The timecode of the playhead first (user 2026-11-12: "trebao bi davati timecode
-        // playholdera, a ne trajanje; ono može biti informacija; za izjave je bitan timecode").
-        if let (Some(playhead), Some(tc)) = (timeline.projection.playhead_frame, timeline.timecode.as_ref()) {
-            mark_label(ui, style, "TC", &tc.label(playhead));
-        }
-        if let Some((start, end)) = timeline.projection.visible_source_marks() {
-            let length = timeline.projection.shown_source_length((start, end));
-            let [start, end, length] = match timeline.timecode {
-                Some(tc) => [tc.label(start), tc.label(end), tc.duration_label(length)],
-                None => [start, end, length].map(|frame| frame.to_string()),
-            };
-            mark_label(ui, style, "IN", &start);
-            mark_label(ui, style, "OUT", &end);
-            mark_label(ui, style, qnc_ui_text::text("source.duration"), &length);
+        // The timecode of the clip's start, of the playhead, of the clip's end, and the duration
+        // of the part chosen (IN to OUT) last (user 2026-11-13: "iza naziva klipa TC početka
+        // cijelog klipa, zatim TC playholdera, krajnji TC i iza njega trajanje"; "na kraju samo
+        // trajanje odabranog dijela, nepotreban je prikaz IN/OUT, on je zapisan u bazi").
+        let projection = timeline.projection;
+        if let Some(playhead) = projection.playhead_frame {
+            let label = |frame: u64| timeline.timecode.as_ref().map_or_else(|| frame.to_string(), |tc| tc.label(frame));
+            let clip_end = timeline.clip_frames.unwrap_or_else(|| projection.range_start_frame + projection.duration_frames);
+            mark_label(ui, style, "", &label(0));
+            mark_label(ui, style, "TC", &label(playhead));
+            mark_label(ui, style, "", &label(clip_end));
+            if let Some((start, end)) = projection.visible_source_marks() {
+                // A duration, not a timecode (user 2026-11-13: "njegovo trajanje, ne TC").
+                let length = timeline.timecode.as_ref().map_or_else(|| (end - start).to_string(), |tc| length_label(end - start, tc.fps));
+                mark_label(ui, style, qnc_ui_text::text("source.duration"), &length);
+            }
         }
         add_header(ui);
     });
@@ -235,4 +258,14 @@ pub fn show_timeline_dock_with(
         timeline.wave_over_video,
         &timeline.level_curves,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_part_chosen_is_a_duration_not_a_timecode() {
+        assert_eq!(super::length_label(46, 50), "0:46");
+        assert_eq!(super::length_label(5 * 50 + 3, 50), "5:03");
+        assert_eq!(super::length_label(13 * 60 * 50 + 29 * 50 + 8, 50), "13:29:08");
+    }
 }
