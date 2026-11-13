@@ -10,7 +10,7 @@
 pub const MODULE_ID: &str = "qnc.module.shot-detect";
 
 mod parts;
-pub use parts::{camera_move, parts, Camera, Move, Part, PART_LEAST_SECONDS};
+pub use parts::{camera_move, parts, zoom_scale, Camera, Move, Part, PART_LEAST_SECONDS};
 
 /// One small grey picture of the clip at `frame` (row by row, `width * height` bytes).
 #[derive(Debug, Clone, PartialEq, Eq)]

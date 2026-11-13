@@ -73,6 +73,44 @@ fn detailed(frame: u64, shift: i32, level: u8) -> Picture {
     Picture { frame, width: w, height: h, luma }
 }
 
+/// A picture of smooth detail grown by `scale` about its middle.
+fn zoomed(frame: u64, scale: f32) -> Picture {
+    let (w, h) = (160usize, 90usize);
+    let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
+    let luma = (0..w * h)
+        .map(|i| {
+            let (x, y) = (((i % w) as f32 - cx) / scale + cx, ((i / w) as f32 - cy) / scale + cy);
+            let v = 128.0 + 55.0 * (x * 0.31).sin() * (y * 0.27).cos() + 35.0 * ((x + 2.0 * y) * 0.13).sin();
+            v.clamp(0.0, 255.0) as u8
+        })
+        .collect();
+    Picture { frame, width: w, height: h, luma }
+}
+
+#[test]
+fn a_take_gives_its_zoom_in_and_its_zoom_out() {
+    // 50 fps, a picture every 25 frames (half a second): 0-4 s the camera stands, 4-10 s it zooms
+    // in 3 % a picture, 10-16 s it zooms out as much.
+    let mut pictures = Vec::new();
+    let mut scale = 1.0f32;
+    for i in 0..33u64 {
+        let second = i as f64 * 0.5;
+        if (4.0..10.0).contains(&second) {
+            scale *= 1.03;
+        } else if second >= 10.0 {
+            scale /= 1.03;
+        }
+        pictures.push(zoomed(i * 25, scale));
+    }
+    assert!(zoom_scale(&zoomed(0, 1.0), &zoomed(25, 1.03), camera_move(&zoomed(0, 1.0), &zoomed(25, 1.03))) > 1.0, "a grown picture is a zoom in");
+    let found_shots = shots(pictures.clone(), 33 * 25);
+    let found = parts(pictures, &found_shots, 50.0);
+    let cameras: Vec<Camera> = found.iter().map(|p| p.camera).collect();
+    assert!(cameras.contains(&Camera::ZoomIn), "{found:?}");
+    assert!(cameras.contains(&Camera::ZoomOut), "{found:?}");
+    assert!(found.iter().all(|p| Camera::of_name(p.camera.name()) == Some(p.camera)));
+}
+
 #[test]
 fn a_shift_of_the_whole_picture_is_found() {
     let moved = camera_move(&detailed(0, 0, 60), &detailed(25, 7, 60));

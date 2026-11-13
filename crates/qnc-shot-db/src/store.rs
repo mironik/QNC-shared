@@ -71,7 +71,7 @@ impl Store {
             && shots.shots.iter().all(|shot| shot.from < shot.to && shot.from <= shot.key_frame && shot.key_frame < shot.to)
             && shots.shots.windows(2).all(|pair| pair[0].to == pair[1].from)
             && shots.parts.iter().all(|part| part.from < part.to && part.from <= part.key_frame && part.key_frame <= part.to)
-            && shots.parts.iter().all(|part| matches!(part.camera.as_str(), "steady" | "pan"))
+            && shots.parts.iter().all(|part| matches!(part.camera.as_str(), "steady" | "pan" | "zoom_in" | "zoom_out"))
             && (shots.error.is_empty() || shots.shots.is_empty() && shots.parts.is_empty());
         if !valid {
             return Err(qnc_ui_text::text("db.shot_invalid").into());

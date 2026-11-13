@@ -52,7 +52,7 @@ pub fn look_missing(reader: &SettingsReader, settings: &WorkSettings, local_medi
     let db = ProjectDbTarget::for_project(reader, settings)?;
     // A clip looked at only through its poster is looked at again once its shots are analysed.
     let looked: Vec<String> = qnc_shot_content_db::read_all(&db, &model)?.into_iter().filter(|clip| !poster_only(clip)).map(|clip| clip.clip_id).collect();
-    let mut remaining: Vec<String> = qnc_shot_db::read_analysed(&db)?.into_iter().filter(|clip| !looked.contains(clip)).collect();
+    let mut remaining: Vec<String> = qnc_shot_db::read_analysed(&db)?.into_iter().filter(|clip| !looked.contains(clip) && (pace.takes)(clip)).collect();
     // The label vectors the forms sort the B-roll by (no model in a form): made again only when
     // the list of labels says something else than the kept ones.
     let labels = qnc_shot_labels::installed_path().and_then(|path| qnc_shot_labels::Labels::read(&path)).ok();
@@ -148,10 +148,11 @@ pub fn look_missing(reader: &SettingsReader, settings: &WorkSettings, local_medi
             break;
         }
         // A statement is not cut by its pictures (user 2026-11-10: "a shot with A1 must not be cut
-        // into many small pieces; if it is cut, by its sound, not by its picture"): it stays a
-        // whole shot.
+        // into many small pieces; if it is cut, by its sound, not by its picture"): its shot stays
+        // whole; another shot of the same clip (the scene changed completely) is B-roll
+        // (user 2026-11-12).
         let looked = looked.map(|parts| match (&labels, &label_texts) {
-            (Some(list), Some(texts)) if quick && is_statement(&parts, list, texts, &qnc_transcript_db::read_clip(&db, &clip_id).unwrap_or_default()) => whole_shots(&shots, parts),
+            (Some(list), Some(texts)) if quick => statement_shots(&shots, parts, list, texts, &qnc_transcript_db::read_clip(&db, &clip_id).unwrap_or_default()),
             _ => parts,
         });
         let content = match looked {
@@ -237,9 +238,9 @@ fn poster_only(clip: &ClipContent) -> bool {
     clip.parts.len() == 1 && clip.parts[0].kind == POSTER
 }
 
-/// Whether a shot kind is a usable part of the analysis (steady, pan).
+/// Whether a shot kind is a usable part of the analysis (steady, pan, zoom in, zoom out).
 fn is_part(kind: &str) -> bool {
-    matches!(kind, "steady" | "pan")
+    matches!(kind, "steady" | "pan" | "zoom_in" | "zoom_out")
 }
 
 /// The kind of a shot of a statement (kept whole, never looked at finely, never B-roll).
@@ -265,21 +266,59 @@ pub fn whole_shots(shots: &qnc_shot_db::ClipShots, parts: Vec<PartContent>) -> V
         .iter()
         .filter_map(|shot| {
             let inside: Vec<&PartContent> = parts.iter().filter(|part| shot.from <= part.from && part.to <= shot.to).collect();
-            let first = inside.first()?;
-            let mut vector = vec![0.0f32; first.vector.len()];
-            for part in &inside {
-                for (sum, value) in vector.iter_mut().zip(&part.vector) {
-                    *sum += value;
-                }
-            }
-            let norm = vector.iter().map(|v| v * v).sum::<f32>().sqrt().max(1e-12);
-            vector.iter_mut().for_each(|v| *v /= norm);
-            let mut frames: Vec<u64> = inside.iter().flat_map(|part| part.frames.iter().copied()).collect();
-            frames.sort_unstable();
-            frames.dedup();
-            Some(PartContent { from: shot.from, to: shot.to, kind: STATEMENT.into(), frames, vector, poster: first.poster.clone(), fine: true })
+            whole_shot(shot.from, shot.to, &inside)
         })
         .collect()
+}
+
+/// The units inside one shot as one unit of kind `STATEMENT`.
+fn whole_shot(from: u64, to: u64, inside: &[&PartContent]) -> Option<PartContent> {
+    let first = inside.first()?;
+    let mut vector = vec![0.0f32; first.vector.len()];
+    for part in inside {
+        for (sum, value) in vector.iter_mut().zip(&part.vector) {
+            *sum += value;
+        }
+    }
+    let norm = vector.iter().map(|v| v * v).sum::<f32>().sqrt().max(1e-12);
+    vector.iter_mut().for_each(|v| *v /= norm);
+    let mut frames: Vec<u64> = inside.iter().flat_map(|part| part.frames.iter().copied()).collect();
+    frames.sort_unstable();
+    frames.dedup();
+    Some(PartContent { from, to, kind: STATEMENT.into(), frames, vector, poster: first.poster.clone(), fine: true })
+}
+
+/// The look of a clip shot by shot (user 2026-11-12: "a statement is not looked at with the AI
+/// shots, but when the shot changes completely it is, because B-roll can come from it"): a shot
+/// that is a statement (its pictures look like one and its A1 is spoken) stays whole; every
+/// other shot of the clip keeps its units, so they are B-roll.
+pub fn statement_shots(
+    shots: &qnc_shot_db::ClipShots,
+    parts: Vec<PartContent>,
+    list: &qnc_shot_labels::Labels,
+    texts: &qnc_shot_content::Texts,
+    transcripts: &[qnc_transcript_db::ClipTranscript],
+) -> Vec<PartContent> {
+    let mut out = Vec::with_capacity(parts.len());
+    let mut taken = vec![false; parts.len()];
+    for shot in &shots.shots {
+        let indices: Vec<usize> = (0..parts.len()).filter(|&i| !taken[i] && shot.from <= parts[i].from && parts[i].to <= shot.to).collect();
+        if indices.is_empty() {
+            continue;
+        }
+        let inside: Vec<PartContent> = indices.iter().map(|&i| parts[i].clone()).collect();
+        indices.iter().for_each(|&i| taken[i] = true);
+        if is_statement(&inside, list, texts, transcripts) {
+            let refs: Vec<&PartContent> = inside.iter().collect();
+            out.extend(whole_shot(shot.from, shot.to, &refs));
+        } else {
+            out.extend(inside);
+        }
+    }
+    // A unit outside every shot (none from `units`) is kept as it is.
+    out.extend(parts.into_iter().zip(taken).filter(|(_, was)| !was).map(|(part, _)| part));
+    out.sort_by_key(|part| part.from);
+    out
 }
 
 /// The shots a clip is looked at in (user 2026-11-10: "every shot the analysis found: steady,

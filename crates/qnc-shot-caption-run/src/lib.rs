@@ -67,7 +67,7 @@ pub fn caption_missing(root: &Path, reader: &SettingsReader, settings: &WorkSett
     let fine_comes = content_engine.pictures > 1;
     let mut wanted: Vec<Wanted> = qnc_shot_content_db::read_all(&db, &content_engine.model_name())?
         .into_iter()
-        .filter(|clip| !(fine_comes && clip.parts.iter().any(|part| !part.fine && matches!(part.kind.as_str(), "steady" | "pan"))))
+        .filter(|clip| !(fine_comes && clip.parts.iter().any(|part| !part.fine && matches!(part.kind.as_str(), "steady" | "pan" | "zoom_in" | "zoom_out"))))
         .flat_map(|clip| {
             let clip_id = clip.clip_id;
             clip.parts.into_iter().map(move |part| (clip_id.clone(), part))

@@ -18,12 +18,24 @@ const PAN_EVEN: f32 = 0.5;
 /// The farthest shift searched between two pictures, as a share of their width (a second at
 /// the fastest usable pan is half the width; the pictures are about half a second apart).
 const SEARCH_SHARE: f32 = 0.2;
+/// A zoom (user 2026-11-13: "ne označavaš odzume ili zumove"): the picture grows or shrinks
+/// about its middle by at least this share a second; faster than `ZOOM_MOST` is a crash zoom.
+const ZOOM_LEAST: f32 = 0.03;
+const ZOOM_MOST: f32 = 0.6;
+/// The scales searched between two pictures (one about every 1 %, up to ±12 %).
+const ZOOM_STEPS: i32 = 12;
+/// A scale counts only when it matches the pictures clearly better than none.
+const ZOOM_BETTER: f32 = 0.85;
 
 /// How the camera holds a part.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Camera {
     Steady,
     Pan,
+    /// The picture grows: the camera zooms in.
+    ZoomIn,
+    /// The picture shrinks: the camera zooms out.
+    ZoomOut,
 }
 
 impl Camera {
@@ -31,7 +43,14 @@ impl Camera {
         match self {
             Self::Steady => "steady",
             Self::Pan => "pan",
+            Self::ZoomIn => "zoom_in",
+            Self::ZoomOut => "zoom_out",
         }
+    }
+
+    /// The camera of a part kept by its name; `None` for a name no part has.
+    pub fn of_name(name: &str) -> Option<Self> {
+        [Self::Steady, Self::Pan, Self::ZoomIn, Self::ZoomOut].into_iter().find(|camera| camera.name() == name)
     }
 }
 
@@ -77,11 +96,25 @@ pub fn parts(mut pictures: Vec<Picture>, shots: &[Shot], rate: f64) -> Vec<Part>
         let speed = v.0.hypot(v.1);
         velocity.push(v);
         let ok = same_shot && usable_picture(&measures[i]) && usable_picture(&measures[i + 1]) && seconds <= 1.5;
+        // How fast the picture grows (+) or shrinks (-) about its middle, a share a second.
+        let zoom = if ok && speed <= PAN_MOST { zoom_scale(&pair[0], &pair[1], moved).ln() / seconds as f32 } else { 0.0 };
         kind.push(match () {
-            _ if !ok || speed > PAN_MOST => None,
+            _ if !ok || speed > PAN_MOST || zoom.abs() > ZOOM_MOST => None,
+            _ if zoom >= ZOOM_LEAST => Some(Camera::ZoomIn),
+            _ if zoom <= -ZOOM_LEAST => Some(Camera::ZoomOut),
             _ if speed <= STEADY => Some(Camera::Steady),
             _ => Some(Camera::Pan),
         });
+    }
+    // A zoom is a part only while it goes on: one pair alone is a lens breathing or a jolt.
+    for i in 0..kind.len() {
+        if !matches!(kind[i], Some(Camera::ZoomIn | Camera::ZoomOut)) {
+            continue;
+        }
+        let same = |j: usize| kind[j] == kind[i];
+        if !(i > 0 && same(i - 1)) && !(i + 1 < kind.len() && same(i + 1)) {
+            kind[i] = None;
+        }
     }
     // A pan is a part only while its moves are even.
     for i in 0..kind.len() {
@@ -151,6 +184,53 @@ pub fn camera_move(a: &Picture, b: &Picture) -> Move {
         }
     }
     Move { dx: fine.0, dy: fine.1, residual: fine.2 }
+}
+
+/// The scale of picture `b` against `a` about their middle, after the camera's shift `moved`:
+/// the one of ±`ZOOM_STEPS` % that matches them best, when it matches clearly better than none
+/// (a scale over 1 is the picture grown, a zoom in); otherwise 1.
+pub fn zoom_scale(a: &Picture, b: &Picture, moved: Move) -> f32 {
+    let cost = |scale: f32| scaled_difference(a, b, scale, (moved.dx, moved.dy));
+    let still = cost(1.0);
+    let (scale, best) = (-ZOOM_STEPS..=ZOOM_STEPS)
+        .filter(|step| *step != 0)
+        .map(|step| 1.0 + step as f32 / 100.0)
+        .map(|scale| (scale, cost(scale)))
+        .min_by(|x, y| x.1.total_cmp(&y.1))
+        .unwrap_or((1.0, f32::MAX));
+    if best < ZOOM_BETTER * still { scale } else { 1.0 }
+}
+
+/// The mean difference (0-1) of `a` and `b` where `b` is `a` grown by `scale` about the middle
+/// and shifted by (`dx`, `dy`), over the middle of `a` (its outer fifth left out).
+fn scaled_difference(a: &Picture, b: &Picture, scale: f32, (dx, dy): (i32, i32)) -> f32 {
+    let (w, h) = (a.width.min(b.width) as f32, a.height.min(b.height) as f32);
+    let (cx, cy) = (w / 2.0, h / 2.0);
+    let (mx, my) = ((w * 0.2) as usize, (h * 0.2) as usize);
+    // `b` between its pixels (a zoom of a few percent moves the picture by less than a pixel
+    // near the middle).
+    let at = |x: usize, y: usize| f32::from(b.luma[y * b.width + x]);
+    let (mut sum, mut count) = (0.0f32, 0u32);
+    for y in my..(h as usize).saturating_sub(my) {
+        for x in mx..(w as usize).saturating_sub(mx) {
+            let bx = cx + (x as f32 - cx) * scale + dx as f32;
+            let by = cy + (y as f32 - cy) * scale + dy as f32;
+            if bx < 0.0 || by < 0.0 || bx >= w - 1.0 || by >= h - 1.0 {
+                continue;
+            }
+            let (x0, y0) = (bx as usize, by as usize);
+            let (fx, fy) = (bx - x0 as f32, by - y0 as f32);
+            let top = at(x0, y0) * (1.0 - fx) + at(x0 + 1, y0) * fx;
+            let bottom = at(x0, y0 + 1) * (1.0 - fx) + at(x0 + 1, y0 + 1) * fx;
+            let seen = top * (1.0 - fy) + bottom * fy;
+            sum += (f32::from(a.luma[y * a.width + x]) - seen).abs();
+            count += 1;
+        }
+    }
+    if count == 0 {
+        return f32::MAX;
+    }
+    sum / count as f32 / 255.0
 }
 
 /// The mean difference (0-1) of `a` and `b` shifted by (`dx`, `dy`), over `a` without a border
