@@ -115,6 +115,19 @@ fn length_label(frames: u64, fps: u32) -> String {
     }
 }
 
+/// A duration with its frames (after the last colon) in `frames` colour.
+fn duration_label(ui: &mut Ui, style: &TimelineDockStyle, name: &str, value: &str, frames: egui::Color32) {
+    ui.label(RichText::new(name).size(style.font_ui).color(style.border));
+    let (whole, part) = value.rsplit_once(':').map_or((value, None), |(whole, part)| (whole, Some(part)));
+    let font = egui::FontId::monospace(style.font_ui);
+    let mut job = egui::text::LayoutJob::default();
+    job.append(whole, 0.0, egui::TextFormat { font_id: font.clone(), color: style.text, ..Default::default() });
+    if let Some(part) = part {
+        job.append(&format!(":{part}"), 0.0, egui::TextFormat { font_id: font, color: frames, ..Default::default() });
+    }
+    ui.label(job);
+}
+
 fn mark_label(ui: &mut Ui, style: &TimelineDockStyle, name: &str, value: &str) {
     ui.label(RichText::new(name).size(style.font_ui).color(style.border));
     ui.label(
@@ -236,7 +249,8 @@ pub fn show_timeline_dock_with(
             if let Some((start, end)) = projection.visible_source_marks() {
                 // A duration, not a timecode (user 2026-11-13: "njegovo trajanje, ne TC").
                 let length = timeline.timecode.as_ref().map_or_else(|| (end - start).to_string(), |tc| length_label(end - start, tc.fps));
-                mark_label(ui, style, qnc_ui_text::text("source.duration"), &length);
+                // Its frames in another shade (user 2026-11-13: "da ne bi netko krivo shvatio").
+                duration_label(ui, style, qnc_ui_text::text("source.duration"), &length, timeline.theme.focus);
             }
         }
         add_header(ui);
