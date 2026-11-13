@@ -25,9 +25,22 @@ pub struct ReaderConfig {
     pub token_env: Option<String>,
 }
 
+/// The environment variable of a process given the project it works on (a project id of the
+/// registry, chosen from the database by the program that starts the process; never made up).
+/// Without it the process works on the project the database marks active. Local registries only.
+pub const PINNED_PROJECT_ENV: &str = "QNC_WORK_PROJECT";
+
+/// The project this process was given to work on, when it was.
+pub fn pinned_project() -> Option<String> {
+    std::env::var(PINNED_PROJECT_ENV).ok().map(|id| id.trim().to_string()).filter(|id| !id.is_empty())
+}
+
 #[derive(Clone)]
 pub struct SettingsReader {
     config: ReaderConfig,
+    /// The project this reader reads instead of the active one (`PINNED_PROJECT_ENV`, or
+    /// `with_project`).
+    pinned: Option<String>,
 }
 
 /// Private transport bindings for public DB adapters, never form state or wire data.
@@ -115,7 +128,14 @@ impl SettingsReader {
                 endpoint: None,
                 token_env: None,
             },
+            pinned: pinned_project(),
         }
+    }
+
+    /// Reads the project `project_id` of the registry instead of the active one.
+    pub fn with_project(mut self, project_id: &str) -> Self {
+        self.pinned = Some(project_id.to_string());
+        self
     }
 
     pub fn from_config(config: ReaderConfig) -> Result<Self, ReadError> {
@@ -128,7 +148,7 @@ impl SettingsReader {
         } else if config.registry_file.is_some() || config.endpoint.is_none() {
             return Err(config_error());
         }
-        Ok(Self { config })
+        Ok(Self { config, pinned: pinned_project() })
     }
 
     pub fn from_root(root: &Path) -> Result<Self, ReadError> {
@@ -159,7 +179,13 @@ impl SettingsReader {
                     .as_deref()
                     .ok_or_else(config_error)?,
                 &self.config.registry_uri,
+                self.pinned.as_deref(),
             );
+        }
+        // A project given to the process is read only from a local registry; over the network
+        // it would silently be another project.
+        if self.pinned.is_some() {
+            return Err(ReadError::new("transport_config", "A project given to a process is read only from a local registry."));
         }
         let base = self.config.endpoint.as_deref().ok_or_else(config_error)?;
         let url = url::Url::parse(base).map_err(|_| config_error())?;

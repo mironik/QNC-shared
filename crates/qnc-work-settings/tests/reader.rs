@@ -98,6 +98,15 @@ fn active_selection_is_read_from_database_not_cached_or_supplied_by_ui() {
 }
 
 #[test]
+fn a_reader_given_a_project_reads_it_whichever_the_database_marks_active() {
+    let root = fixture();
+    let path = root.path().join("data/qnc-projects.db");
+    let given = SettingsReader::local(&path).with_project("p2");
+    assert_eq!(given.read().unwrap().project_id, "p2", "the active project is p1");
+    assert!(SettingsReader::local(&path).with_project("p9").read().is_err(), "a project the registry has not");
+}
+
+#[test]
 fn standalone_read_has_no_project_app_and_changes_no_database_bytes() {
     let root = fixture();
     let paths = [

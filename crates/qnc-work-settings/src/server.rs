@@ -49,7 +49,8 @@ pub fn respond(
         return;
     }
     let reply = ReadReply {
-        result: local::read(registry_file, registry_uri),
+        // The server answers the project the database marks active, never one given to it.
+        result: local::read(registry_file, registry_uri, None),
     };
     let Ok(bytes) = serde_json::to_vec(&reply) else {
         let _ = request.respond(tiny_http::Response::empty(500));

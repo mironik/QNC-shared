@@ -73,20 +73,26 @@ fn bound_path(resolver: &ResolverConfig, uri: &str) -> Result<PathBuf, ReadError
     }
 }
 
-pub(crate) fn read(registry_file: &Path, context_uri: &str) -> Result<WorkSettings, ReadError> {
+pub(crate) fn read(registry_file: &Path, context_uri: &str, pinned: Option<&str>) -> Result<WorkSettings, ReadError> {
     let context = crate::registry_context(context_uri)?;
     let resolver =
         ResolverConfig::new(PathBuf::new()).with_local_binding(LOCAL_REGISTRY_URI, registry_file);
     let mut registry = open_read_only(&bound_path(&resolver, LOCAL_REGISTRY_URI)?)?;
     let tx = registry.transaction().map_err(|_| db_error())?;
-    let active: Option<String> = tx
-        .query_row(
-            "SELECT value FROM public_app_settings WHERE key = 'active_project_id'",
-            [],
-            |r| r.get(0),
-        )
-        .optional()
-        .map_err(|_| db_error())?;
+    // A process given the project it works on (QNC-AI: the ingest of one card into its own base,
+    // chosen by the tray from the bases' registry, user 2026-11-14) reads that project; every
+    // other process the one the database marks active.
+    let active: Option<String> = match pinned {
+        Some(pinned) => Some(pinned.to_string()),
+        None => tx
+            .query_row(
+                "SELECT value FROM public_app_settings WHERE key = 'active_project_id'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|_| db_error())?,
+    };
     let active = active.filter(|id| !id.is_empty()).ok_or_else(|| {
         ReadError::new("no_active_project", "No active project is chosen in the database.")
     })?;
