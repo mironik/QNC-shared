@@ -178,6 +178,9 @@ pub enum Operation {
     ReadQuotes,
     /// The clips that have a kept transcript (user 2026-10-28: the pool's Transcript tab).
     ReadTranscribed,
+    /// The clips whose kept transcript has words (user 2026-11-13: a clip without speech is
+    /// transcribed, but has no place in the Transcript tab).
+    ReadSpoken,
     /// Everything transcribed of a clip goes, and its entry of the queue (user 2026-11-09: the X
     /// on its card); the statements chosen from it stay. Refused while the clip is transcribed.
     ForgetClip { clip_id: String },
@@ -270,6 +273,16 @@ pub fn add_quote(target: &ProjectDbTarget, quote: Quote) -> Result<()> {
 pub fn read_transcribed(target: &ProjectDbTarget) -> Result<Vec<String>> {
     let mut client = target.open(Access::ReadOnly, vec![TranscriptModule::factory()])?;
     let answer = client.execute(MODULE_ID, encode(&Operation::ReadTranscribed)?)?;
+    match serde_json::from_value(answer).map_err(|e| e.to_string())? {
+        Data::Clips(clips) => Ok(clips),
+        _ => Err(qnc_ui_text::text("db.transcript_reply").into()),
+    }
+}
+
+/// The clips whose kept transcript has words: the pool's Transcript tab.
+pub fn read_spoken(target: &ProjectDbTarget) -> Result<Vec<String>> {
+    let mut client = target.open(Access::ReadOnly, vec![TranscriptModule::factory()])?;
+    let answer = client.execute(MODULE_ID, encode(&Operation::ReadSpoken)?)?;
     match serde_json::from_value(answer).map_err(|e| e.to_string())? {
         Data::Clips(clips) => Ok(clips),
         _ => Err(qnc_ui_text::text("db.transcript_reply").into()),

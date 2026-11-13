@@ -149,6 +149,10 @@ fn transcribed_clips_are_listed_and_done_entries_leave_the_queue_failed_ones_sta
     save(&target, transcript(0, 50, "Vidite")).unwrap();
     save(&target, transcript(100, 200, "Dobar")).unwrap();
     assert_eq!(read_transcribed(&target).unwrap(), ["c1"], "a clip once, however many ranges");
+    // A clip without speech is transcribed (nothing heard) but has no words for the tab.
+    save(&target, ClipTranscript { clip_id: "quiet".into(), lines: Vec::new(), ..transcript(0, 300, "") }).unwrap();
+    assert_eq!(read_transcribed(&target).unwrap(), ["c1", "quiet"]);
+    assert_eq!(read_spoken(&target).unwrap(), ["c1"], "only a transcript with words");
     enqueue(&target, vec![asked("a", QueueQuality::Fast), asked("b", QueueQuality::Fast)]).unwrap();
     set_queued(&target, &asked("a", QueueQuality::Fast), QueueState::Done, "", 100).unwrap();
     set_queued(&target, &asked("b", QueueQuality::Fast), QueueState::Failed, "no sound", 0).unwrap();

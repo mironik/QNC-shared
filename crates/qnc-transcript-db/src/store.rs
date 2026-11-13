@@ -52,6 +52,8 @@ impl Store {
             Operation::DeleteQuote { id } => self.delete_quote(*id),
             Operation::ReadTranscribed if !self.schema_ready => Ok(Data::Clips(Vec::new())),
             Operation::ReadTranscribed => self.read_transcribed(),
+            Operation::ReadSpoken if !self.schema_ready => Ok(Data::Clips(Vec::new())),
+            Operation::ReadSpoken => self.read_spoken(),
             Operation::ClearDone => self.clear_done(),
             Operation::ForgetClip { clip_id } => self.forget_clip(clip_id),
         }
@@ -70,6 +72,16 @@ impl Store {
         tx.execute("DELETE FROM transcript_queue WHERE clip_id = ?1", params![clip_id]).map_err(err)?;
         tx.commit().map_err(err)?;
         Ok(Data::Changed)
+    }
+
+    /// A transcript with words has at least one line (an empty one is kept as `[]`).
+    fn read_spoken(&mut self) -> Result<Data> {
+        let mut statement = self
+            .conn
+            .prepare("SELECT DISTINCT clip_id FROM public_clip_transcripts WHERE trim(lines_json) NOT IN ('', '[]') ORDER BY clip_id")
+            .map_err(err)?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0)).map_err(err)?;
+        Ok(Data::Clips(rows.collect::<std::result::Result<_, _>>().map_err(err)?))
     }
 
     fn read_transcribed(&mut self) -> Result<Data> {
