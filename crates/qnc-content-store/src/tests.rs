@@ -437,6 +437,36 @@ fn concurrent_writers_keep_journal_and_claim_a_clip_once() {
     ContentStore::open_owner_binding(&path, URI, Access::ReadOnly).unwrap();
 }
 #[test]
+fn the_import_takes_the_clips_in_the_order_they_were_recorded() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db");
+    database(&path);
+    let mut store = ContentStore::open_owner_binding(&path, URI, Access::ReadWrite).unwrap();
+    // Recorded at 10:30 UTC, 09:00 UTC (written in the camera's zone, +02:00) and 10:00 UTC; one without a time.
+    let recorded = [("a-late", Some("2026-09-08T10:30:00Z")), ("b-early", Some("2026-09-08T11:00:00+02:00")), ("c-middle", Some("2026-09-08T10:00:00Z")), ("d-none", None)];
+    for (name, at) in recorded {
+        let mut made = clip(name);
+        match at {
+            Some(at) => {
+                made.snapshot.metadata.original.tags.insert("creation_time".into(), fact(at.to_string()).unwrap());
+            }
+            None => {
+                made.snapshot.metadata.original.tags.remove("creation_time");
+            }
+        }
+        run(&mut store, Operation::Publish(Box::new(made))).unwrap();
+    }
+    let ids = recorded.iter().map(|(name, _)| clip(name).id().to_string()).collect::<Vec<_>>();
+    run(&mut store, Operation::Select { clip_ids: ids, selected: true }).unwrap();
+    run(&mut store, Operation::QueueSelected { needs: qnc_import_fit::Needs::original_only() }).unwrap();
+    let mut order = Vec::new();
+    while let Data::Claimed(Some(claimed)) = run(&mut store, Operation::ClaimNext).unwrap() {
+        order.push(claimed.clip.name.clone());
+    }
+    assert_eq!(order, ["b-early", "c-middle", "a-late", "d-none"]);
+}
+
+#[test]
 fn reselection_preserves_import_and_never_replaces_final_metadata() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("db");

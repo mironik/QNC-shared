@@ -397,10 +397,14 @@ impl ContentStore {
                     [IMPORT_LEASE_SECONDS],
                 )
                 .map_err(err)?;
-                // The shortest clip first (live 2026-11-12: six short clips waited behind a 6 GB one;
-                // what is copied first is worked on first).
+                // In the order they were recorded (user 2026-11-13: "neka uvoz po vremenu nastanka";
+                // replaces the shortest clip first of 2026-11-12). The recording time is compared as a
+                // moment, whatever zone the camera wrote; a clip without it comes after, by name.
                 let mut clip = tx.query_row(
-                    &format!("SELECT {} FROM clips WHERE import_status='queued' ORDER BY COALESCE(duration_frames, 0), clip_id LIMIT 1", stored_columns(self.has_copy_of)),
+                    &format!(
+                        "SELECT {} FROM clips WHERE import_status='queued' ORDER BY julianday(created_at_utc) IS NULL, julianday(created_at_utc), name, clip_id LIMIT 1",
+                        stored_columns(self.has_copy_of)
+                    ),
                     [], row).optional().map_err(err)?;
                 if let Some(clip) = &mut clip {
                     tx.execute(
