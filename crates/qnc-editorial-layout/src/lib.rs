@@ -152,7 +152,7 @@ impl EditorialContracts {
             return qnc_board::Layout::block("right-panel").with_face("right");
         }
         if self.composition().statements_pool.is_some() {
-            return self.three_columns(tab_selected, height);
+            return self.three_columns(tab_selected, height, ColumnSizes::default());
         }
         let layout = self.media_layout(self.board_sizes().standard_layout(&self.board_names()));
         let bar = &self.composition().pool_actions;
@@ -208,8 +208,19 @@ impl EditorialContracts {
     /// clip cards and the pool action bar; in the middle the monitor, the transport under it and
     /// the group's panel (`right-panel`, the transcript) in the lower half; on the right the
     /// title and the cards of the statements made.
-    fn three_columns(&self, tab_selected: impl Fn(&str) -> bool, bar_height: f32) -> qnc_board::Layout {
+    /// The board of a group with the statements' column, its columns as the user dragged them
+    /// (`sizes`); any other group: `board_layout`.
+    pub fn board_layout_sized(&self, tab_selected: impl Fn(&str) -> bool, sizes: ColumnSizes) -> qnc_board::Layout {
+        if self.composition().statements_pool.is_some() && self.composition().media_overlay.is_none() {
+            let height = qnc_action_bar_panel::height(self.shell.theme_metrics.chrome_control_height, self.editorial.board.block_pad);
+            return self.three_columns(tab_selected, height, sizes);
+        }
+        self.board_layout(tab_selected)
+    }
+
+    fn three_columns(&self, tab_selected: impl Fn(&str) -> bool, bar_height: f32, sizes: ColumnSizes) -> qnc_board::Layout {
         use qnc_board::{Axis, Layout, Node, Part, Size};
+        let sizes = sizes.held();
         let block = |name: &str| Some(Node::Block { name: name.to_string() });
         let px = |px| Size::Px { px, max_share: None };
         let share = |ratio| Size::Share { ratio, min: 160.0, rest_min: 160.0 };
@@ -220,7 +231,7 @@ impl EditorialContracts {
             left.push(Part { size: px(bar_height), face: None, node: block(POOL_ACTIONS) });
         }
         let middle = vec![
-            Part { size: share(MONITOR_SHARE), face: None, node: block("preview") },
+            Part { size: share(sizes.monitor), face: None, node: block("preview") },
             Part { size: px(row), face: None, node: block("transport") },
             Part { size: Size::Rest, face: Some("right".into()), node: block("right-panel") },
         ];
@@ -228,9 +239,9 @@ impl EditorialContracts {
         let columns = Node::Split {
             axis: Axis::Horizontal,
             parts: vec![
-                Part { size: share(SIDE_SHARE), face: Some("left".into()), node: Some(Node::Split { axis: Axis::Vertical, parts: left }) },
+                Part { size: share(sizes.left), face: Some("left".into()), node: Some(Node::Split { axis: Axis::Vertical, parts: left }) },
                 Part { size: Size::Rest, face: Some("bg".into()), node: Some(Node::Split { axis: Axis::Vertical, parts: middle }) },
-                Part { size: share(SIDE_SHARE), face: Some("left".into()), node: Some(Node::Split { axis: Axis::Vertical, parts: right }) },
+                Part { size: share(sizes.right), face: Some("left".into()), node: Some(Node::Split { axis: Axis::Vertical, parts: right }) },
             ],
         };
         Layout {
@@ -447,9 +458,34 @@ pub struct StatementsPool {
 pub const STATEMENTS_HEAD: &str = "statements-head";
 pub const STATEMENT_CARDS: &str = "statement-cards";
 /// The share of the board's width of each side column and of the middle column's height for the
-/// monitor (with the transport under it).
+/// monitor (with the transport under it), until the user drags them.
 const SIDE_SHARE: f32 = 0.27;
 const MONITOR_SHARE: f32 = 0.5;
+
+/// The sizes of the three columns (user 2026-11-14: "da se paneli mogu širiti po korisnikovim
+/// potrebama"): the side columns' shares of the board's width, the monitor's share of the middle
+/// column's height. A choice of the view, kept by the form while it runs, never in a database.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ColumnSizes {
+    pub left: f32,
+    pub right: f32,
+    pub monitor: f32,
+}
+
+impl Default for ColumnSizes {
+    fn default() -> Self {
+        Self { left: SIDE_SHARE, right: SIDE_SHARE, monitor: MONITOR_SHARE }
+    }
+}
+
+impl ColumnSizes {
+    /// Within reach: no column under a tenth of the board, the middle keeps a fifth.
+    pub fn held(self) -> Self {
+        let left = self.left.clamp(0.1, 0.6);
+        let right = self.right.clamp(0.1, (0.8 - left).max(0.1));
+        Self { left, right, monitor: self.monitor.clamp(0.15, 0.85) }
+    }
+}
 
 /// The place of the pool action bar on the board.
 pub const POOL_ACTIONS: &str = "pool-actions";

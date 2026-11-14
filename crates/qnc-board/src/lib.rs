@@ -468,7 +468,9 @@ fn draw<R>(
     answer
 }
 
+mod edge;
 mod frame;
+pub use edge::drag_edge;
 pub use frame::{show_in_frame, show_surface_in_frame, Frame, FrameBlocks};
 
 #[cfg(test)]
