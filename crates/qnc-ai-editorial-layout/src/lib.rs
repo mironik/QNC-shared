@@ -152,9 +152,6 @@ impl EditorialContracts {
         if self.composition().media_overlay.is_some() {
             return qnc_board::Layout::block("right-panel").with_face("right");
         }
-        if self.composition().statements_pool.is_some() {
-            return self.three_columns(tab_selected, height, ColumnSizes::default());
-        }
         let layout = self.media_layout(self.board_sizes().standard_layout(&self.board_names()));
         let bar = &self.composition().pool_actions;
         let shown = !bar.actions.is_empty() && bar.tabs.iter().any(|tab| tab_selected(tab));
@@ -205,49 +202,36 @@ impl EditorialContracts {
         Some(if shown { layout.split_place_below("clip-cards", POOL_ACTIONS, height) } else { layout })
     }
 
-    /// Three columns over the source timeline (user 2026-11-14): on the left the pool tabs, the
-    /// clip cards and the pool action bar; in the middle the monitor, the transport under it and
-    /// the group's panel (`right-panel`, the transcript) in the lower half; on the right the
-    /// title and the cards of the statements made.
-    /// The board of a group with the statements' column, its columns as the user dragged them
-    /// (`sizes`); any other group: `board_layout`.
-    pub fn board_layout_sized(&self, tab_selected: impl Fn(&str) -> bool, sizes: ColumnSizes) -> qnc_board::Layout {
-        if self.composition().statements_pool.is_some() && self.composition().media_overlay.is_none() {
-            let height = qnc_action_bar_panel::height(self.shell.theme_metrics.chrome_control_height, self.editorial.board.block_pad);
-            return self.three_columns(tab_selected, height, sizes);
+    /// The board with the statements made in a column of their own on the right of the group's
+    /// panel, only while there are any (user 2026-11-14: "vratiti stari izgled, a na desnoj strani
+    /// ostaviti izjave, ako postoje"); without statements, or for a group without the column, the
+    /// standard board.
+    /// The panels as the user dragged them (`sizes`, user 2026-11-14: "neka ostane mogucnost
+    /// promjene dimenzija svih panela, a trenutni neka bude default"); `PanelSizes::default()` is
+    /// this layout as the contract gives it.
+    pub fn board_layout_with(&self, tab_selected: impl Fn(&str) -> bool, statements: bool, sizes: PanelSizes) -> qnc_board::Layout {
+        if self.composition().media_overlay.is_some() {
+            return self.board_layout(tab_selected);
         }
-        self.board_layout(tab_selected)
-    }
-
-    fn three_columns(&self, tab_selected: impl Fn(&str) -> bool, bar_height: f32, sizes: ColumnSizes) -> qnc_board::Layout {
-        use qnc_board::{Axis, Layout, Node, Part, Size};
-        let sizes = sizes.held();
-        let block = |name: &str| Some(Node::Block { name: name.to_string() });
-        let px = |px| Size::Px { px, max_share: None };
-        let share = |ratio| Size::Share { ratio, min: 160.0, rest_min: 160.0 };
-        let row = self.shell.theme_metrics.chrome_row_height;
+        let mut board = self.board_sizes();
+        if let Some(left) = sizes.left {
+            board.left_ratio = left.clamp(0.15, 0.8);
+        }
+        if let Some(height) = sizes.monitor {
+            // A monitor height of the user's: a fixed height instead of the picture shape.
+            board.monitor_aspect = None;
+            board.monitor_height = height.max(80.0);
+        }
+        let height = qnc_action_bar_panel::height(self.shell.theme_metrics.chrome_control_height, self.editorial.board.block_pad);
+        let layout = self.media_layout(board.standard_layout(&self.board_names()));
         let bar = &self.composition().pool_actions;
-        let mut left = vec![Part { size: px(row), face: None, node: block("pool-head") }, Part { size: Size::Rest, face: None, node: block("clip-cards") }];
-        if !bar.actions.is_empty() && bar.tabs.iter().any(|tab| tab_selected(tab)) {
-            left.push(Part { size: px(bar_height), face: None, node: block(POOL_ACTIONS) });
-        }
-        let middle = vec![
-            Part { size: share(sizes.monitor), face: None, node: block("preview") },
-            Part { size: px(row), face: None, node: block("transport") },
-            Part { size: Size::Rest, face: Some("right".into()), node: block("right-panel") },
-        ];
-        let right = vec![Part { size: px(row), face: None, node: block(STATEMENTS_HEAD) }, Part { size: Size::Rest, face: None, node: block(STATEMENT_CARDS) }];
-        let columns = Node::Split {
-            axis: Axis::Horizontal,
-            parts: vec![
-                Part { size: share(sizes.left), face: Some("left".into()), node: Some(Node::Split { axis: Axis::Vertical, parts: left }) },
-                Part { size: Size::Rest, face: Some("bg".into()), node: Some(Node::Split { axis: Axis::Vertical, parts: middle }) },
-                Part { size: share(sizes.right), face: Some("left".into()), node: Some(Node::Split { axis: Axis::Vertical, parts: right }) },
-            ],
-        };
-        Layout {
-            face: Some("bg".into()),
-            root: Node::Split { axis: Axis::Vertical, parts: vec![Part { size: Size::Rest, face: None, node: Some(columns) }, Part { size: px(self.dock_height()), face: None, node: block("source-dock") }] },
+        let layout = if !bar.actions.is_empty() && bar.tabs.iter().any(|tab| tab_selected(tab)) { layout.split_place_below("clip-cards", POOL_ACTIONS, height) } else { layout };
+        match self.composition().statements_pool.as_ref().filter(|_| statements) {
+            Some(pool) => {
+                let width = sizes.statements.unwrap_or(pool.width).max(160.0);
+                layout.split_place("right-panel", STATEMENT_CARDS, width).split_place_above(STATEMENT_CARDS, STATEMENTS_HEAD, self.shell.theme_metrics.chrome_row_height)
+            }
+            None => layout,
         }
     }
 
@@ -440,53 +424,36 @@ pub struct GroupComposition {
     /// user 2026-11-01); none: they are places of the board.
     #[serde(default)]
     pub media_overlay: Option<MediaOverlay>,
-    /// A pool of the statements made of its own, beside the media pool (AI Media Assist, user
-    /// 2026-11-14): the board is then three columns over the source timeline, the media pool on
-    /// the left, the monitor with the group's panel (the transcript) under it in the middle, the
-    /// statements on the right. None: the standard board.
+    /// The statements made in a column of their own on the right of the group's panel, shown only
+    /// while there are any (AI Media Assist, user 2026-11-14). None: no such column.
     #[serde(default)]
     pub statements_pool: Option<StatementsPool>,
 }
 
-/// The pool of the statements made, in its own column.
+/// The column of the statements made.
 #[derive(Debug, Clone, Deserialize)]
 pub struct StatementsPool {
     /// The title over its cards.
     pub title: String,
+    /// Its width in pixels.
+    pub width: f32,
 }
 
-/// The places of the three-column board (`statements_pool`).
+/// The sizes of the panels as the user dragged their borders; `None`: as the contract gives it.
+/// A choice of the view, kept by the form while it runs, never in a database.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct PanelSizes {
+    /// The left column's share of the board's width.
+    pub left: Option<f32>,
+    /// The monitor's height in pixels.
+    pub monitor: Option<f32>,
+    /// The statements' column width in pixels.
+    pub statements: Option<f32>,
+}
+
+/// The places of the statements' column (`statements_pool`).
 pub const STATEMENTS_HEAD: &str = "statements-head";
 pub const STATEMENT_CARDS: &str = "statement-cards";
-/// The share of the board's width of each side column and of the middle column's height for the
-/// monitor (with the transport under it), until the user drags them.
-const SIDE_SHARE: f32 = 0.27;
-const MONITOR_SHARE: f32 = 0.5;
-
-/// The sizes of the three columns (user 2026-11-14: "da se paneli mogu širiti po korisnikovim
-/// potrebama"): the side columns' shares of the board's width, the monitor's share of the middle
-/// column's height. A choice of the view, kept by the form while it runs, never in a database.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ColumnSizes {
-    pub left: f32,
-    pub right: f32,
-    pub monitor: f32,
-}
-
-impl Default for ColumnSizes {
-    fn default() -> Self {
-        Self { left: SIDE_SHARE, right: SIDE_SHARE, monitor: MONITOR_SHARE }
-    }
-}
-
-impl ColumnSizes {
-    /// Within reach: no column under a tenth of the board, the middle keeps a fifth.
-    pub fn held(self) -> Self {
-        let left = self.left.clamp(0.1, 0.6);
-        let right = self.right.clamp(0.1, (0.8 - left).max(0.1));
-        Self { left, right, monitor: self.monitor.clamp(0.15, 0.85) }
-    }
-}
 
 /// The place of the pool action bar on the board.
 pub const POOL_ACTIONS: &str = "pool-actions";
