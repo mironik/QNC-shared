@@ -191,7 +191,7 @@ pub fn extract_filmstrip_frames_with_cancel(
         }
         FfmpegFilmstripMode::ExactSeek => filmstrip_seek_args(source, frames, thumb_size, temp_dir, false, true),
     };
-    run_filmstrip_command(executable, args, cancel)
+    run_filmstrip_command(executable, args, cancel, true)
 }
 
 /// Encoded key pictures (each one whole, as the container stores it) decoded into
@@ -234,7 +234,7 @@ pub fn decode_pictures_with_cancel(
             temp_dir.join(format!("{index:03}.jpg")).into_os_string(),
         ]);
     }
-    run_filmstrip_command(executable, args, cancel)
+    run_filmstrip_command(executable, args, cancel, true)
 }
 
 /// `count` consecutive pictures from the exact picture at `start_sec` in one decoder
@@ -281,7 +281,8 @@ pub fn extract_frame_run_with_cancel(
         "0".into(),
         temp_dir.join("%03d.jpg").into_os_string(),
     ];
-    run_filmstrip_command(executable, args, cancel)
+    // The pictures of the trim zoom: the user waits for them, not background work.
+    run_filmstrip_command(executable, args, cancel, false)
 }
 
 /// The key pictures of the video from about `start_sec` for `duration_sec` (seconds from
@@ -502,10 +503,14 @@ fn parse_key_packets(text: &str) -> std::result::Result<Vec<f64>, String> {
     Ok(times)
 }
 
+/// `background`: the pictures of background work (filmstrips, the AI shots); its decoder runs
+/// at the lowest priority, below the transcription the user waits for (user 2026-11-14:
+/// "montaža ne može početi bez prijepisa"), the player and the desktop.
 fn run_filmstrip_command(
     executable: &Path,
     args: Vec<OsString>,
     cancel: &AtomicBool,
+    background: bool,
 ) -> std::result::Result<(), String> {
     let mut command = Command::new(executable);
     command
@@ -515,8 +520,11 @@ fn run_filmstrip_command(
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
+        // No window; IDLE_PRIORITY_CLASS for background work.
+        command.creation_flags(0x08000000 | if background { 0x0000_0040 } else { 0 });
     }
+    #[cfg(not(windows))]
+    let _ = background;
     let mut child = command
         .spawn()
         .map_err(|error| format!("filmstrip ffmpeg start: {error}"))?;
