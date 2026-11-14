@@ -36,6 +36,15 @@ const PICTURE: [u32; 2] = [160, 90];
 const MOST_A_SECOND: f64 = 4.0;
 /// Pictures decoded in one decoder call.
 const BATCH: usize = 16;
+/// Decoder calls at once at most (user 2026-11-14: the AI shots on several cores; measured on the
+/// laptop: 4 at once 2.1x faster than one); never more than half the threads of this computer.
+const MOST_DECODERS: usize = 4;
+
+/// How many decoder calls run at once on this computer.
+fn decoders() -> usize {
+    let threads = std::thread::available_parallelism().map_or(2, usize::from);
+    (threads / 2).clamp(1, MOST_DECODERS)
+}
 
 /// The project whose clips are analysed: its settings as read from its database.
 #[derive(Debug, Clone)]
@@ -175,24 +184,42 @@ pub fn analyse_file(clip_id: &str, codec: &str, path: &Path, pace: &Pace<'_>) ->
     let temp = scratch_dir(clip_id);
     let result: Result<Vec<qnc_shot_detect::Picture>, String> = (|| {
         let mut pictures = Vec::with_capacity(entries.len());
-        for batch in entries.chunks(BATCH) {
+        let batches: Vec<&[(usize, u64)]> = entries.chunks(BATCH).collect();
+        // Several batches at once, each decoded by its own decoder call in a folder of its own;
+        // the pictures are read one after the other (the file, one reader), the decoding is what
+        // takes the time.
+        for group in batches.chunks(decoders()) {
             if !wait_for_player(pace) {
                 return Err(qnc_ui_text::text("shots.stopped").into());
             }
             let _ = fs::remove_dir_all(&temp);
-            fs::create_dir_all(&temp).map_err(|e| e.to_string())?;
-            let mut inputs = Vec::with_capacity(batch.len());
-            for (n, &(id, _)) in batch.iter().enumerate() {
-                let picture = keys.picture(id)?;
-                let input = temp.join(format!("{n:03}.{codec}"));
-                fs::write(&input, picture).map_err(|e| e.to_string())?;
-                inputs.push(input);
+            let mut work = Vec::with_capacity(group.len());
+            for (b, batch) in group.iter().enumerate() {
+                let folder = temp.join(format!("b{b}"));
+                fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+                let mut inputs = Vec::with_capacity(batch.len());
+                for (n, &(id, _)) in batch.iter().enumerate() {
+                    let picture = keys.picture(id)?;
+                    let input = folder.join(format!("{n:03}.{codec}"));
+                    fs::write(&input, picture).map_err(|e| e.to_string())?;
+                    inputs.push(input);
+                }
+                work.push((folder, inputs));
             }
-            extractor.decode_pictures_with_cancel(codec, &inputs, PICTURE, &temp, pace.cancel)?;
-            for (n, &(_, shown)) in batch.iter().enumerate() {
-                let Ok(image) = image::open(temp.join(format!("{n:03}.jpg"))) else { continue };
-                let grey = image.into_luma8();
-                pictures.push(qnc_shot_detect::Picture { frame: shown, width: grey.width() as usize, height: grey.height() as usize, luma: grey.into_raw() });
+            let decoded: Vec<Result<(), String>> = std::thread::scope(|scope| {
+                let running: Vec<_> = work
+                    .iter()
+                    .map(|(folder, inputs)| scope.spawn(|| extractor.decode_pictures_with_cancel(codec, inputs, PICTURE, folder, pace.cancel).map_err(|e| e.to_string())))
+                    .collect();
+                running.into_iter().map(|thread| thread.join().unwrap_or_else(|_| Err("a decoder thread failed".into()))).collect()
+            });
+            for (((folder, _), batch), decoded) in work.iter().zip(group).zip(decoded) {
+                decoded?;
+                for (n, &(_, shown)) in batch.iter().enumerate() {
+                    let Ok(image) = image::open(folder.join(format!("{n:03}.jpg"))) else { continue };
+                    let grey = image.into_luma8();
+                    pictures.push(qnc_shot_detect::Picture { frame: shown, width: grey.width() as usize, height: grey.height() as usize, luma: grey.into_raw() });
+                }
             }
         }
         Ok(pictures)
