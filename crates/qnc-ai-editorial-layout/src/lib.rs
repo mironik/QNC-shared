@@ -11,7 +11,9 @@ use serde::Deserialize;
 pub use qnc_desktop_theme as theme;
 pub use qnc_desktop_theme::{ShellColors, ShellLayoutContract, ShellThemeMetrics};
 
-const SHELL_LAYOUT_JSON: &str = include_str!("../../../contracts/ui/shell.layout.json");
+// QNC-AI's own colours (user 2026-11-15: clean, no decoration): the shell contract's copy with a
+// graphite palette and one colour only, red, for IN/OUT; QNC's own shell contract stays as it is.
+const SHELL_LAYOUT_JSON: &str = include_str!("../../../contracts/ui/ai-shell.layout.json");
 const EDITORIAL_LAYOUT_JSON: &str = include_str!("../../../contracts/ui/ai-editorial.layout.json");
 const KEYBOARD_SHORTCUTS_JSON: &str =
     include_str!("../../../contracts/qnc-keyboard-shortcuts.json");
@@ -28,7 +30,7 @@ pub struct EditorialContracts {
 impl EditorialContracts {
     pub fn load(group: &str) -> Result<Self, String> {
         report_to_result(qnc_contracts::validate_ui_layout_contract_json(
-            "contracts/ui/shell.layout.json",
+            "contracts/ui/ai-shell.layout.json",
             SHELL_LAYOUT_JSON,
         ))?;
         report_to_result(qnc_contracts::validate_ui_layout_contract_json(
