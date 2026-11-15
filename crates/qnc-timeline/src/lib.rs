@@ -17,6 +17,8 @@ pub use level_lines::{level_curve_hit, paint_level_curves, TimelineLevelCurve};
 pub use qnc_timeline_model::event;
 pub use lanes::{drafted_choice, lane_choice, lane_key, lane_message, Lane, LaneChoice, LaneKey};
 
+pub use qnc_wave_view::WaveShape;
+
 pub const MODULE_ID: &str = "qnc.module.timeline";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -258,6 +260,8 @@ pub struct TimelineTheme {
     pub unheard: Color32,
     /// The zones of a level meter: under -12 dBFS, from -12, from -3.
     pub meter: [Color32; 3],
+    /// How waves are drawn (QNC mirrored, QNC-AI the amplitude on a dB scale, user 2026-11-15).
+    pub wave_shape: qnc_wave_view::WaveShape,
 }
 
 
@@ -1042,8 +1046,8 @@ fn paint_audio_row(
     }
     ui.painter().rect_filled(track_rect, 0.0, fill); // no frame: the lane meets the filmstrip
     let gain = lane_gain(input, lane);
-    qnc_wave_view::paint_wave_peaks_gain(ui.painter(), track_rect, peaks, gain, wave);
-    qnc_wave_view::paint_level_marks(ui.painter(), track_rect, 1.0, input.theme.level_marks);
+    qnc_wave_view::paint_wave_shape(ui.painter(), track_rect, peaks, gain, wave, input.theme.wave_shape, [input.theme.meter[1], input.theme.meter[2]]);
+    qnc_wave_view::paint_level_marks_shape(ui.painter(), track_rect, 1.0, input.theme.level_marks, input.theme.wave_shape);
     // No level curve on the narrow lane: it is led only in the lane's zoom (user 2026-11-07).
     paint_lane_level(ui, track_rect, lane, input);
     paint_ranges_and_playhead(ui, track_rect, input);
@@ -1135,8 +1139,8 @@ fn paint_audio_band(ui: &mut egui::Ui, band: Rect, lane: AudioLane, peaks: &[f32
     let label = if input.show_lane_labels { lane.label() } else { "" };
     paint_lane_button(ui, label_rect, lane, label, input);
     let gain = lane_gain(input, lane);
-    qnc_wave_view::paint_wave_peaks_gain(ui.painter(), track_rect, peaks, gain, input.theme.audio_wave);
-    qnc_wave_view::paint_level_marks(ui.painter(), track_rect, 1.0, input.theme.level_marks);
+    qnc_wave_view::paint_wave_shape(ui.painter(), track_rect, peaks, gain, input.theme.audio_wave, input.theme.wave_shape, [input.theme.meter[1], input.theme.meter[2]]);
+    qnc_wave_view::paint_level_marks_shape(ui.painter(), track_rect, 1.0, input.theme.level_marks, input.theme.wave_shape);
     paint_lane_level(ui, track_rect, lane, input);
     let label_response = ui.interact(
         label_rect,
@@ -2851,7 +2855,7 @@ fn paint_wave_over_video(ui: &mut egui::Ui, row: Rect, peaks: &[f32], level: u8,
     let zoom = f32::from(1u16 << (level - 1).min(6));
     let painter = ui.painter().with_clip_rect(track);
     painter.rect_filled(track, 0.0, input.theme.audio_primary_background); // the same lane, only taller
-    qnc_wave_view::paint_wave_peaks_gain(&painter, track, peaks, zoom * lane_gain, wave);
-    qnc_wave_view::paint_level_marks(&painter, track, zoom, input.theme.level_marks);
+    qnc_wave_view::paint_wave_shape(&painter, track, peaks, zoom * lane_gain, wave, input.theme.wave_shape, [input.theme.meter[1], input.theme.meter[2]]);
+    qnc_wave_view::paint_level_marks_shape(&painter, track, zoom, input.theme.level_marks, input.theme.wave_shape);
     paint_ranges_and_playhead(ui, track, input);
 }

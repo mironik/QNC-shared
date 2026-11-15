@@ -254,6 +254,9 @@ pub struct MediaColors {
     /// The lines of -18, -9 and -1 dBFS in an audio lane (RGBA) and the level curve.
     pub level_marks: [[u8; 4]; 3],
     pub level_curve: [u8; 3],
+    /// The amplitude on a dB scale from the lane's bottom instead of the mirrored peak.
+    #[serde(default)]
+    pub wave_amplitude: bool,
 }
 
 impl Default for MediaColors {
@@ -272,6 +275,7 @@ impl Default for MediaColors {
             check_on: [0xff, 0x95, 0x00],
             level_marks: [[220, 230, 225, 70], [240, 200, 40, 150], [220, 60, 50, 170]],
             level_curve: [235, 235, 235],
+            wave_amplitude: false,
         }
     }
 }
