@@ -304,7 +304,7 @@ fn paint_lane_tools(
     theme: &TimelineTheme,
 ) -> Option<ActionEvent> {
     let text = if lane == 0 { "A1" } else { "A2" };
-    let look = qnc_timeline::LaneLook { label_background: visuals.window_fill, silent: theme.cut, taken: theme.lane_taken, text: visuals.text_color(), accent: theme.cut_side };
+    let look = qnc_timeline::LaneLook { label_background: visuals.window_fill, silent: theme.cut, taken: theme.lane_taken, text: visuals.text_color(), accent: theme.cut_side, quiet: if theme.lane_quiet { theme.muted } else { visuals.text_color() } };
     let label = Rect::from_min_size(band.left_top() + Vec2::new(2.0, 2.0), LABEL_SIZE);
     // The sound of the taken cut on this lane shows as a taken lane.
     let shown = choice.or(cut_sound_taken.then_some(ChannelChoice { selected: 0, count: 0, open: true, off: false, level_db: 0, heard_db: 0 }));

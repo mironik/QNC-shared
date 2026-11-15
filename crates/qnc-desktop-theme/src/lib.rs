@@ -260,6 +260,9 @@ pub struct MediaColors {
     /// The line between an audio lane and the picture (none without it).
     #[serde(default)]
     pub lane_divider: Option<[u8; 3]>,
+    /// A lane not taken muted, the taken one bright.
+    #[serde(default)]
+    pub lane_quiet: bool,
 }
 
 impl Default for MediaColors {
@@ -280,6 +283,7 @@ impl Default for MediaColors {
             level_curve: [235, 235, 235],
             wave_amplitude: false,
             lane_divider: None,
+            lane_quiet: false,
         }
     }
 }

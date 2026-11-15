@@ -43,6 +43,7 @@ pub fn timeline(theme: &Theme) -> qnc_timeline::TimelineTheme {
         unheard: Color32::from_rgba_premultiplied(70, 10, 10, 70),
         meter: media.meter.map(c),
         lane_divider: media.lane_divider.map_or(Color32::TRANSPARENT, c),
+        lane_quiet: media.lane_quiet,
         wave_shape: if media.wave_amplitude { qnc_timeline::WaveShape::Amplitude } else { qnc_timeline::WaveShape::Mirrored },
     }
 }

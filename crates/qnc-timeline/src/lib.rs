@@ -264,6 +264,8 @@ pub struct TimelineTheme {
     pub wave_shape: qnc_wave_view::WaveShape,
     /// The line between an audio lane and the picture (transparent: none).
     pub lane_divider: Color32,
+    /// A lane not taken drawn muted, the taken one bright (QNC-AI; QNC: false).
+    pub lane_quiet: bool,
 }
 
 
@@ -1059,7 +1061,7 @@ fn paint_audio_row(
     };
     if line > 0.0 {
         let y = if lane == AudioLane::A1 { row.bottom() - line * 0.5 } else { row.top() + line * 0.5 };
-        ui.painter().hline(row.x_range(), y, Stroke::new(line, input.theme.lane_divider));
+        ui.painter().hline(track_rect.x_range(), y, Stroke::new(line, input.theme.lane_divider));
     }
     let gain = lane_gain(input, lane);
     let peaks = level_lines::with_curves(peaks, if lane == AudioLane::A2 { 1 } else { 0 }, input);
@@ -1103,12 +1105,16 @@ pub struct LaneLook {
     pub taken: Color32,
     pub text: Color32,
     pub accent: Color32,
+    /// The text and rim of a lane that is not taken (QNC-AI: muted, so only the taken lane, the one
+    /// whose wave is over the picture, is bright; QNC: `text`, as before).
+    pub quiet: Color32,
 }
 
 impl LaneLook {
     pub fn of(theme: impl std::borrow::Borrow<TimelineTheme>) -> Self {
         let theme = theme.borrow();
-        Self { label_background: theme.label_background, silent: theme.lane_silent, taken: theme.lane_taken, text: theme.text, accent: theme.playhead }
+        let quiet = if theme.lane_quiet { theme.muted } else { theme.text };
+        Self { label_background: theme.label_background, silent: theme.lane_silent, taken: theme.lane_taken, text: theme.text, accent: theme.playhead, quiet }
     }
 }
 
@@ -1120,9 +1126,10 @@ pub fn paint_lane_button_of(ui: &mut egui::Ui, label_rect: Rect, label: &str, ch
     let button = label_rect.shrink2(Vec2::new(3.0, 1.5));
     let silent = choice.is_some_and(|choice| choice.silent());
     ui.painter().rect_filled(button, 3.0, if silent { look.silent } else { look.label_background });
-    let rim = if choice.is_some_and(|choice| choice.open) { Stroke::new(2.0, look.taken) } else { Stroke::new(1.0, look.text) };
+    let open = choice.is_some_and(|choice| choice.open);
+    let rim = if open { Stroke::new(2.0, look.taken) } else { Stroke::new(1.0, look.quiet) };
     ui.painter().rect_stroke(button, 3.0, rim, StrokeKind::Inside);
-    ui.painter().text(button.center(), Align2::CENTER_CENTER, label, FontId::proportional(12.0), look.text);
+    ui.painter().text(button.center(), Align2::CENTER_CENTER, label, FontId::proportional(12.0), if open { look.text } else { look.quiet });
 }
 
 /// The level a lane is heard at, at the start of its track (public, AGENTS 0.12).
