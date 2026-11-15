@@ -251,6 +251,9 @@ pub struct MediaColors {
     pub dot_pending: [u8; 3],
     pub dot_error: [u8; 3],
     pub check_on: [u8; 3],
+    /// The lines of -18, -9 and -1 dBFS in an audio lane (RGBA) and the level curve.
+    pub level_marks: [[u8; 4]; 3],
+    pub level_curve: [u8; 3],
 }
 
 impl Default for MediaColors {
@@ -267,6 +270,8 @@ impl Default for MediaColors {
             dot_pending: [0xff, 0xd6, 0x0a],
             dot_error: [0xff, 0x45, 0x3a],
             check_on: [0xff, 0x95, 0x00],
+            level_marks: [[220, 230, 225, 70], [240, 200, 40, 150], [220, 60, 50, 170]],
+            level_curve: [235, 235, 235],
         }
     }
 }
