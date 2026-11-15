@@ -1048,15 +1048,22 @@ fn paint_audio_row(
         return drag;
     }
     ui.painter().rect_filled(track_rect, 0.0, fill); // no frame: the lane meets the filmstrip
-    // QNC-AI: a line where the lane meets the picture (user 2026-11-15: "da se ne stapaju u jednu
-    // nepravilnu površinu"); A1 is over the picture, the others under it. Transparent in QNC.
-    if input.theme.lane_divider.a() > 0 {
-        let y = if lane == AudioLane::A1 { row.bottom() - 1.0 } else { row.top() + 1.0 };
-        ui.painter().hline(row.x_range(), y, Stroke::new(2.0, input.theme.lane_divider));
+    // QNC-AI: the order is the picture, a line, the lane (user 2026-11-15: "da se ne stapaju u jednu
+    // nepravilnu površinu"; "ide filmstrip, linija, A1 ton; ton se crta iznad linije"): the line
+    // stands at the lane's edge to the picture and the wave beside it, never under it.
+    let line = if input.theme.lane_divider.a() > 0 { 3.0 } else { 0.0 };
+    let wave_rect = if lane == AudioLane::A1 {
+        Rect::from_min_max(track_rect.min, egui::pos2(track_rect.right(), track_rect.bottom() - line))
+    } else {
+        Rect::from_min_max(egui::pos2(track_rect.left(), track_rect.top() + line), track_rect.max)
+    };
+    if line > 0.0 {
+        let y = if lane == AudioLane::A1 { row.bottom() - line * 0.5 } else { row.top() + line * 0.5 };
+        ui.painter().hline(row.x_range(), y, Stroke::new(line, input.theme.lane_divider));
     }
     let gain = lane_gain(input, lane);
     let peaks = level_lines::with_curves(peaks, if lane == AudioLane::A2 { 1 } else { 0 }, input);
-    qnc_wave_view::paint_wave_shape(ui.painter(), track_rect, &peaks, gain, wave, input.theme.wave_shape, [input.theme.meter[1], input.theme.meter[2]]);
+    qnc_wave_view::paint_wave_shape(ui.painter(), wave_rect, &peaks, gain, wave, input.theme.wave_shape, [input.theme.meter[1], input.theme.meter[2]]);
     qnc_wave_view::paint_level_marks_shape(ui.painter(), track_rect, 1.0, input.theme.level_marks, input.theme.wave_shape);
     // No level curve on the narrow lane: it is led only in the lane's zoom (user 2026-11-07).
     paint_lane_level(ui, track_rect, lane, input);
