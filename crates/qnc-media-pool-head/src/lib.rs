@@ -208,7 +208,7 @@ fn transport_btn(
         Color32::TRANSPARENT
     };
     let border = if active { style.accent } else { style.border };
-    ui.add(qnc_ui_kit::framed_button(
+    let response = ui.add(qnc_ui_kit::framed_button(
             RichText::new(label)
                 .color(text)
                 .monospace()
@@ -217,7 +217,8 @@ fn transport_btn(
         fill,
         Some(border),
         false,
-    ))
+    ));
+    qnc_ui_kit::press_feedback(ui, response)
 }
 
 /// Text tab link (underline when active).

@@ -177,7 +177,8 @@ fn chrome_row(ui: &mut egui::Ui, style: &DockStyle, add_contents: impl FnOnce(&m
 
 /// Ghost text action button.
 fn action_btn(ui: &mut egui::Ui, style: &DockStyle, label: &str) -> egui::Response {
-    ui.add(qnc_ui_kit::framed_button(RichText::new(label).color(style.text).size(style.font_ui), Vec2::new(0.0, style.chrome_control_height), Color32::TRANSPARENT, Some(style.border), false))
+    let response = ui.add(qnc_ui_kit::framed_button(RichText::new(label).color(style.text).size(style.font_ui), Vec2::new(0.0, style.chrome_control_height), Color32::TRANSPARENT, Some(style.border), false));
+    qnc_ui_kit::press_feedback(ui, response)
 }
 
 fn timecode_label(ui: &mut egui::Ui, style: &DockStyle, label: &str, value: &str, focused: bool) {

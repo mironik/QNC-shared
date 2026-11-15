@@ -80,6 +80,8 @@ pub fn total_text() -> Color32 {
 }
 
 pub fn apply(ctx: &egui::Context, theme: &Theme) {
+    // Read by the gui-kit's buttons (`qnc_ui_kit::PRESS_FEEDBACK_KEY`).
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new("qnc-press-feedback"), theme.media.press_feedback));
     let mut style = (*ctx.style()).clone();
     style.text_styles = [
         (
@@ -263,6 +265,9 @@ pub struct MediaColors {
     /// A lane not taken muted, the taken one bright.
     #[serde(default)]
     pub lane_quiet: bool,
+    /// Buttons lighter under the pointer, while pressed and a moment after a click.
+    #[serde(default)]
+    pub press_feedback: bool,
 }
 
 impl Default for MediaColors {
@@ -284,6 +289,7 @@ impl Default for MediaColors {
             wave_amplitude: false,
             lane_divider: None,
             lane_quiet: false,
+            press_feedback: false,
         }
     }
 }

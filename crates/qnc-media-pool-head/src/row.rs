@@ -82,5 +82,6 @@ pub fn tab(ui: &mut Ui, text: &str, selected: bool, style: &RowStyle) -> egui::R
 
 fn command(ui: &mut Ui, text: &str, on: bool, style: &RowStyle) -> egui::Response {
     let colour = if on { style.accent } else { style.text };
-    ui.add(qnc_ui_kit::framed_button(RichText::new(text).color(colour), Vec2::new(40.0, style.control_height), Color32::TRANSPARENT, Some(if on { style.accent } else { style.border }), true))
+    let response = ui.add(qnc_ui_kit::framed_button(RichText::new(text).color(colour), Vec2::new(40.0, style.control_height), Color32::TRANSPARENT, Some(if on { style.accent } else { style.border }), true));
+    qnc_ui_kit::press_feedback(ui, response)
 }

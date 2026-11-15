@@ -15,26 +15,28 @@ pub struct ChromeButtonStyle {
 pub fn chrome_button(ui: &mut Ui, text: &str, enabled: bool, on: bool, style: ChromeButtonStyle) -> egui::Response {
     let colour = if on { style.focus } else { style.text };
     let border = if on { style.focus } else { style.border };
-    ui.add_enabled(
+    let response = ui.add_enabled(
         enabled,
         Button::new(RichText::new(text).color(colour))
             .fill(Color32::TRANSPARENT)
             .stroke(Stroke::new(1.0, border))
             .corner_radius(CornerRadius::same(0))
             .min_size(Vec2::new(0.0, style.height)),
-    )
+    );
+    press_feedback(ui, response)
 }
 
 /// The one strong button of a row (e.g. Uvezi): white bold text on the accent fill.
 pub fn strong_button(ui: &mut Ui, text: &str, enabled: bool, fill: Color32, height: f32) -> egui::Response {
-    ui.add_enabled(
+    let response = ui.add_enabled(
         enabled,
         Button::new(RichText::new(text).color(Color32::WHITE).strong())
             .fill(fill)
             .stroke(Stroke::new(0.0, Color32::TRANSPARENT))
             .corner_radius(CornerRadius::same(0))
             .min_size(Vec2::new(0.0, height)),
-    )
+    );
+    press_feedback(ui, response)
 }
 
 /// Fills the rest of a block with its background and gives that rect.
@@ -75,7 +77,8 @@ pub fn look_button(ui: &mut Ui, text: &str, enabled: bool, look: ButtonLook) -> 
     if look.square {
         button = button.corner_radius(CornerRadius::same(0));
     }
-    ui.add_enabled(enabled, button)
+    let response = ui.add_enabled(enabled, button);
+    press_feedback(ui, response)
 }
 
 /// The small button of a list row (egui's own look, small text), greyed while not `enabled`; `selected` draws it as chosen
@@ -106,4 +109,44 @@ pub fn framed_button(text: impl Into<egui::WidgetText>, size: Vec2, fill: Color3
 /// A check box of the gui-kit, greyed while not `enabled`.
 pub fn check_box(ui: &mut Ui, checked: &mut bool, text: impl Into<egui::WidgetText>, enabled: bool) -> egui::Response {
     ui.add_enabled(enabled, egui::Checkbox::new(checked, text))
+}
+
+/// The key under which a form's theme says whether buttons answer a press (QNC-AI: yes; QNC: no,
+/// as before). `qnc-desktop-theme` sets it when it applies the theme.
+pub const PRESS_FEEDBACK_KEY: &str = "qnc-press-feedback";
+
+/// How long a button stays lit after a click.
+const FLASH: f64 = 0.35;
+
+/// A button that answers (user 2026-11-15: "dugme Dodaj izjavu nema nikakav pokazatelj da je
+/// prihvatilo klik"): lighter under the pointer, lighter still while pressed, and lit for a moment
+/// after the click, while the work it starts goes on. Only where the theme asks for it.
+pub fn press_feedback(ui: &Ui, response: egui::Response) -> egui::Response {
+    let on = ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::new(PRESS_FEEDBACK_KEY))).unwrap_or(false);
+    if !on || !response.enabled() {
+        return response;
+    }
+    let now = ui.ctx().input(|input| input.time);
+    let flash_id = response.id.with("qnc-press-flash");
+    if response.clicked() {
+        ui.ctx().data_mut(|data| data.insert_temp(flash_id, now));
+    }
+    let since = ui.ctx().data(|data| data.get_temp::<f64>(flash_id)).map(|at| now - at).filter(|since| *since < FLASH);
+    let alpha = if let Some(since) = since {
+        ui.ctx().request_repaint();
+        (70.0 * (1.0 - since / FLASH)) as u8 + 20
+    } else if response.is_pointer_button_down_on() {
+        60
+    } else if response.hovered() {
+        22
+    } else {
+        0
+    };
+    if alpha > 0 {
+        ui.painter().rect_filled(response.rect, 0.0, Color32::from_white_alpha(alpha));
+    }
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    response
 }

@@ -102,7 +102,56 @@ pub fn cards(rows: Vec<qnc_virtual_shots::ShortClip>, clips: &[qnc_clip_row::Cli
         })
         .collect();
     preserve_loaded_posters(&mut cards, previous);
+    // A statement still being written stays until its row is read (user 2026-11-15).
+    let saving = previous.iter().filter(|old| is_saving(old) && !cards.iter().any(|card| same_cut(card, old)));
+    cards.extend(saving.cloned().collect::<Vec<_>>());
     cards
+}
+
+/// The id of a card shown while its statement is written, before the database has its row; with
+/// the monitor's IN picture as poster (that picture is the statement's own poster too).
+const SAVING: &str = "saving:";
+const SAVING_IN: &str = "saving-in:";
+
+fn is_saving(card: &VirtualShortCard) -> bool {
+    card.shot_id.starts_with(SAVING) || card.shot_id.starts_with(SAVING_IN)
+}
+
+fn same_cut(card: &VirtualShortCard, other: &VirtualShortCard) -> bool {
+    card.clip_id == other.clip_id && card.in_frame == other.in_frame && card.out_frame == other.out_frame && !card.b_roll && !other.b_roll
+}
+
+/// A statement asked to be saved shows at once (user 2026-11-15: "dugo se čeka poster kreirane
+/// izjave, ne čekaj zapis u bazu"): a card of the clip and its IN/OUT with the picture the monitor
+/// showed at the IN (`in_picture`), else the clip's poster; its row replaces it once it is read.
+/// Nothing is written here. A card of the same cut already there is left alone.
+pub fn saving(cards: &mut Vec<VirtualShortCard>, clips: &[qnc_clip_row::ClipRow], clip_id: Option<&str>, marks: Option<(u64, u64)>, in_picture: Option<Arc<qnc_image_assets::RgbaImage>>) {
+    let (Some(clip), Some((in_frame, out_frame))) = (clip_id.and_then(|id| clips.iter().find(|clip| clip.clip_id == id)), marks) else {
+        return;
+    };
+    if cards.iter().any(|card| !card.b_roll && card.clip_id == clip.clip_id && (card.in_frame, card.out_frame) == (in_frame, out_frame)) {
+        return;
+    }
+    let parent = ParentClip { duration_seconds: clip.duration_seconds, duration_frames: clip.duration_frames, import_status: clip.import_status.clone(), imported_media_uri: clip.imported_media_uri.clone() };
+    let kind = if in_picture.is_some() { SAVING_IN } else { SAVING };
+    cards.push(VirtualShortCard {
+        shot_id: format!("{kind}{}:{in_frame}-{out_frame}", clip.clip_id),
+        clip_id: clip.clip_id.clone(),
+        name: clip.name.clone(),
+        in_frame,
+        out_frame,
+        duration_label: duration_label(out_frame.saturating_sub(in_frame), Some(&parent)),
+        import_status: parent.import_status,
+        imported_media_uri: parent.imported_media_uri,
+        poster_uri: None,
+        poster_image: in_picture.or_else(|| clip.thumb_image.clone()),
+        b_roll: false,
+    });
+}
+
+/// The cards shown while their statement was written, when it was not (its error is said).
+pub fn drop_saving(cards: &mut Vec<VirtualShortCard>) {
+    cards.retain(|card| !is_saving(card));
 }
 
 pub fn preserve_loaded_posters(cards: &mut [VirtualShortCard], previous: &[VirtualShortCard]) {
@@ -110,6 +159,10 @@ pub fn preserve_loaded_posters(cards: &mut [VirtualShortCard], previous: &[Virtu
         card.poster_image = previous
             .iter()
             .find(|old| old.shot_id == card.shot_id && old.poster_uri == card.poster_uri)
+            // A statement just written keeps the IN picture shown while it was written until its
+            // own still is read (the same picture).
+            .or_else(|| previous.iter().find(|old| old.shot_id.starts_with(SAVING_IN) && same_cut(card, old)))
+            .or_else(|| previous.iter().find(|old| old.shot_id == card.shot_id && old.in_frame == card.in_frame && old.poster_uri.is_none() && old.poster_image.is_some()))
             .and_then(|old| old.poster_image.clone());
     }
 }
@@ -165,6 +218,24 @@ mod tests {
             still_status: "ready".into(),
             b_roll: false,
         }
+    }
+
+    #[test]
+    fn a_statement_shows_at_once_with_the_in_picture_and_its_row_keeps_it() {
+        let clip = qnc_clip_row::ClipRow { clip_id: "clip-a".into(), name: "Mironik 001".into(), duration_seconds: 10.0, duration_frames: 250, ..Default::default() };
+        let picture = Arc::new(qnc_image_assets::RgbaImage { size: [1, 1], pixels: vec![1, 2, 3, 255], content_key: 7 });
+        let mut shown = Vec::new();
+        saving(&mut shown, std::slice::from_ref(&clip), Some("clip-a"), Some((25, 75)), Some(picture.clone()));
+        assert_eq!(shown.len(), 1, "the card is there before the database has its row");
+        assert_eq!(shown[0].poster_image, Some(picture.clone()));
+        assert_eq!(cards(Vec::new(), std::slice::from_ref(&clip), &shown).len(), 1, "a read before the row keeps it");
+        let written = qnc_virtual_shots::ShortClip { in_still_uri: None, out_still_uri: None, still_status: "pending".into(), ..row() };
+        let read = cards(vec![written], std::slice::from_ref(&clip), &shown);
+        assert_eq!(read.len(), 1, "its row takes its place");
+        assert_eq!(read[0].shot_id, "shot-1");
+        assert_eq!(read[0].poster_image, Some(picture), "with the IN picture until its own still is read");
+        drop_saving(&mut shown);
+        assert!(shown.is_empty());
     }
 
     #[test]
