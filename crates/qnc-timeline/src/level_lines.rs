@@ -142,6 +142,37 @@ pub fn level_curve_hit(band: Rect, (start, duration): (u64, u64), lane: u8, pos:
     ((pos.y - y).abs() <= REACH).then_some(frame)
 }
 
+/// The peaks of `lane` (0 A1, 1 A2) as its level curves make them heard (user 2026-11-15: "kada se
+/// podešava nivo tona wave ne prati povećanje ili smanjenje"): every peak times the curve's level at
+/// its frame; the peaks span the frames the timeline shows. Without a curve on the lane, as they are.
+pub(crate) fn with_curves<'a>(peaks: &'a [f32], lane: u8, input: &TimelineInput<'_>) -> std::borrow::Cow<'a, [f32]> {
+    if input.layers.audio_bands {
+        return std::borrow::Cow::Borrowed(peaks); // a Wrap row's wave holds each part's curve already
+    }
+    let window = (input.state.range_start(), input.state.duration_frames());
+    curved(peaks, lane, window, input.level_curves)
+}
+
+fn curved<'a>(peaks: &'a [f32], lane: u8, (start, duration): (u64, u64), curves: &[TimelineLevelCurve]) -> std::borrow::Cow<'a, [f32]> {
+    let mine: Vec<&TimelineLevelCurve> = curves.iter().filter(|curve| curve.lane == lane && curve.to > start && curve.from < start + duration).collect();
+    if mine.is_empty() || peaks.is_empty() {
+        return std::borrow::Cow::Borrowed(peaks);
+    }
+    let step = duration.max(1) as f64 / peaks.len() as f64;
+    std::borrow::Cow::Owned(
+        peaks
+            .iter()
+            .enumerate()
+            .map(|(at, peak)| {
+                let frame = start as f64 + (at as f64 + 0.5) * step;
+                mine.iter()
+                    .find(|curve| frame >= curve.from as f64 && frame < curve.to as f64)
+                    .map_or(*peak, |curve| peak * qnc_gain::db10_to_gain(curve.level_at(frame)) as f32)
+            })
+            .collect(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,5 +186,21 @@ mod tests {
         let curve = TimelineLevelCurve { lane: 0, from: 0, to: 100, start_db10: 0, end_db10: -200, points: vec![(50.0, -200)], taken: false };
         assert_eq!(curve.level_at(25.0), -100.0);
         assert_eq!(curve.level_at(75.0), -200.0);
+    }
+}
+
+#[cfg(test)]
+mod wave_tests {
+    use super::*;
+
+    #[test]
+    fn a_curve_raises_and_lowers_the_wave_under_it_only() {
+        let curve = TimelineLevelCurve { lane: 0, from: 2, to: 4, start_db10: 60, end_db10: 60, points: vec![], taken: true };
+        let peaks = [0.1_f32; 6];
+        let heard = curved(&peaks, 0, (0, 6), std::slice::from_ref(&curve));
+        assert_eq!(heard[0], 0.1, "before the curve as it is");
+        assert!((heard[2] - 0.1 * 1.995).abs() < 1e-3, "+6 dB under it: {}", heard[2]);
+        assert_eq!(heard[5], 0.1);
+        assert!(matches!(curved(&peaks, 1, (0, 6), std::slice::from_ref(&curve)), std::borrow::Cow::Borrowed(_)), "another lane as it is");
     }
 }

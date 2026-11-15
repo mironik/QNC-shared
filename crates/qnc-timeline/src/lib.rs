@@ -858,7 +858,8 @@ pub fn show(ui: &mut egui::Ui, input: TimelineInput<'_>) -> TimelineIntent {
         };
         if let Some((lane, peaks, level)) = zoom {
             if let Some(rect) = grown(lane, video) {
-                paint_wave_over_video(ui, rect, peaks, level, lane_gain(&input, lane), &input);
+                let peaks = level_lines::with_curves(peaks, if lane == AudioLane::A2 { 1 } else { 0 }, &input);
+                paint_wave_over_video(ui, rect, &peaks, level, lane_gain(&input, lane), &input);
                 paint_zoom_strips(ui, split_label_track(video, input.metrics.label_width).1, &input);
                 // The M markers are the layer over the zoom (user 2026-10-22).
                 if input.layers.markers {
@@ -1046,7 +1047,8 @@ fn paint_audio_row(
     }
     ui.painter().rect_filled(track_rect, 0.0, fill); // no frame: the lane meets the filmstrip
     let gain = lane_gain(input, lane);
-    qnc_wave_view::paint_wave_shape(ui.painter(), track_rect, peaks, gain, wave, input.theme.wave_shape, [input.theme.meter[1], input.theme.meter[2]]);
+    let peaks = level_lines::with_curves(peaks, if lane == AudioLane::A2 { 1 } else { 0 }, input);
+    qnc_wave_view::paint_wave_shape(ui.painter(), track_rect, &peaks, gain, wave, input.theme.wave_shape, [input.theme.meter[1], input.theme.meter[2]]);
     qnc_wave_view::paint_level_marks_shape(ui.painter(), track_rect, 1.0, input.theme.level_marks, input.theme.wave_shape);
     // No level curve on the narrow lane: it is led only in the lane's zoom (user 2026-11-07).
     paint_lane_level(ui, track_rect, lane, input);
