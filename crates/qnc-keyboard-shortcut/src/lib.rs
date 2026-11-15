@@ -10,6 +10,8 @@ pub struct ShortcutEvent {
     pub shift: bool,
     pub ctrl: bool,
     pub alt: bool,
+    /// Tab held with the key (user 2026-11-15: Tab + an arrow chooses the panel).
+    pub tab: bool,
     pub text_input_reserved: bool,
 }
 
@@ -21,6 +23,7 @@ impl ShortcutEvent {
             shift: false,
             ctrl: false,
             alt: false,
+            tab: false,
             text_input_reserved: false,
         }
     }
@@ -33,11 +36,16 @@ pub struct KeyChord {
     pub shift: bool,
     pub ctrl: bool,
     pub alt: bool,
+    /// Tab held with the key, as a modifier (user 2026-11-15); Tab pressed alone stays a key.
+    pub tab: bool,
 }
 
 impl KeyChord {
     pub fn display(&self) -> String {
         let mut parts = Vec::new();
+        if self.tab {
+            parts.push("Tab");
+        }
         if self.ctrl {
             parts.push("Ctrl");
         }
@@ -62,7 +70,7 @@ impl KeyChord {
         if event.text_input_reserved {
             return false;
         }
-        if self.shift != event.shift || self.ctrl != event.ctrl || self.alt != event.alt {
+        if self.shift != event.shift || self.ctrl != event.ctrl || self.alt != event.alt || self.tab != event.tab {
             return false;
         }
         if let (Some(chord_code), Some(event_code)) = (self.code.as_deref(), event.code.as_deref())
@@ -406,6 +414,7 @@ fn parse_chord(value: &Value) -> Result<KeyChord, String> {
         shift: bool_field(object, "shift")?,
         ctrl: bool_field(object, "ctrl")? || bool_field(object, "ctrlKey")?,
         alt: bool_field(object, "alt")?,
+        tab: bool_field(object, "tab")?,
     })
 }
 
@@ -493,13 +502,48 @@ fn code_to_label(code: &str) -> &str {
 
 pub fn egui_shortcut_events(ctx: &egui::Context) -> Vec<ShortcutEvent> {
     let text_input_reserved = ctx.memory(|memory| memory.focused().is_some());
-    ctx.input(|input| {
+    let mut tab = TabHold::of_frame(ctx);
+    let events = ctx.input(|input| {
         input
             .events
             .iter()
-            .filter_map(|event| egui_event_to_shortcut(event, text_input_reserved))
+            .filter_map(|event| egui_event_to_shortcut(event, text_input_reserved, &mut tab))
             .collect()
-    })
+    });
+    tab.keep(ctx);
+    events
+}
+
+/// Tab held as a modifier (user 2026-11-15: Tab + an arrow chooses the panel): a key pressed
+/// while Tab is down carries `tab`; Tab itself is a key only when it is let go with no other
+/// key pressed while it was down, so Tab alone still goes on to the next panel.
+#[derive(Clone, Copy)]
+struct TabHold {
+    down: bool,
+    used: bool,
+}
+
+impl TabHold {
+    const ID: &'static str = "qnc-keyboard-tab-hold";
+
+    /// The hold as the frame began: what the last frame left (the same however often a frame
+    /// asks for its keys).
+    fn of_frame(ctx: &egui::Context) -> Self {
+        let frame = ctx.cumulative_pass_nr();
+        let start = egui::Id::new((Self::ID, "start"));
+        let end = egui::Id::new((Self::ID, "end"));
+        let (down, used) = match ctx.data(|data| data.get_temp::<(u64, bool, bool)>(start)) {
+            Some((at, down, used)) if at == frame => (down, used),
+            _ => ctx.data(|data| data.get_temp::<(bool, bool)>(end)).unwrap_or((false, false)),
+        };
+        ctx.data_mut(|data| data.insert_temp(start, (frame, down, used)));
+        Self { down, used }
+    }
+
+    /// The hold after this frame's keys: the next frame starts from it.
+    fn keep(self, ctx: &egui::Context) {
+        ctx.data_mut(|data| data.insert_temp(egui::Id::new((Self::ID, "end")), (self.down, self.used)));
+    }
 }
 
 /// Whether a key of `action_id` was pressed while a text field holds the keyboard. The
@@ -520,10 +564,11 @@ pub fn consume_egui_action_presses(
     action_id: &str,
 ) -> usize {
     let text_input_reserved = ctx.memory(|memory| memory.focused().is_some());
+    let mut tab = TabHold::of_frame(ctx);
     ctx.input_mut(|input| {
         let mut consumed = 0usize;
         input.events.retain(|event| {
-            let consume = egui_event_to_shortcut(event, text_input_reserved).is_some_and(|event| {
+            let consume = egui_event_to_shortcut(event, text_input_reserved, &mut tab).is_some_and(|event| {
                 catalog
                     .action_ids_for_event(scope, &event)
                     .into_iter()
@@ -538,23 +583,35 @@ pub fn consume_egui_action_presses(
     })
 }
 
-fn egui_event_to_shortcut(event: &egui::Event, text_input_reserved: bool) -> Option<ShortcutEvent> {
-    match event {
-        egui::Event::Key {
-            key,
-            physical_key,
-            pressed,
-            repeat,
-            modifiers,
-            ..
-        } if *pressed && !*repeat => Some(ShortcutEvent {
-            code: physical_key.as_ref().and_then(egui_catalog_key_code),
-            key: egui_catalog_key_name(key),
-            shift: modifiers.shift,
-            ctrl: modifiers.ctrl || modifiers.command,
-            alt: modifiers.alt,
-            text_input_reserved,
-        }),
+fn egui_event_to_shortcut(event: &egui::Event, text_input_reserved: bool, tab: &mut TabHold) -> Option<ShortcutEvent> {
+    let egui::Event::Key { key, physical_key, pressed, repeat, modifiers, .. } = event else {
+        return None;
+    };
+    let shortcut = |held: bool| ShortcutEvent {
+        code: physical_key.as_ref().and_then(egui_catalog_key_code),
+        key: egui_catalog_key_name(key),
+        shift: modifiers.shift,
+        ctrl: modifiers.ctrl || modifiers.command,
+        alt: modifiers.alt,
+        tab: held,
+        text_input_reserved,
+    };
+    match (key, *pressed, *repeat) {
+        // Tab down: a modifier until it is let go.
+        (egui::Key::Tab, true, false) => {
+            *tab = TabHold { down: true, used: false };
+            None
+        }
+        // Tab let go with no key pressed while it was down: Tab pressed alone.
+        (egui::Key::Tab, false, _) => {
+            let alone = tab.down && !tab.used;
+            *tab = TabHold { down: false, used: false };
+            alone.then(|| shortcut(false))
+        }
+        (_, true, false) => {
+            tab.used |= tab.down;
+            Some(shortcut(tab.down))
+        }
         _ => None,
     }
 }
@@ -852,6 +909,7 @@ mod tests {
             shift: false,
             ctrl: true,
             alt: false,
+            tab: false,
             text_input_reserved: false,
         };
         assert_eq!(
@@ -895,5 +953,36 @@ mod backspace_tests {
         assert_eq!(on("Escape"), 1, "Escape is clear_focus only");
         assert_eq!(on("Delete"), 1, "Delete is one action");
         assert_eq!(on("Backspace"), 1, "Backspace is Undo only");
+    }
+}
+
+#[cfg(test)]
+mod tab_hold_tests {
+    use super::*;
+
+    fn key(key: egui::Key, pressed: bool) -> egui::Event {
+        egui::Event::Key { key, physical_key: Some(key), pressed, repeat: false, modifiers: egui::Modifiers::NONE }
+    }
+
+    /// The shortcut events of one frame with `events`.
+    fn frame(ctx: &egui::Context, events: Vec<egui::Event>) -> Vec<ShortcutEvent> {
+        let mut out = Vec::new();
+        // egui may run a second pass without the events: every pass's keys.
+        let _ = ctx.run(egui::RawInput { events, ..Default::default() }, |ctx| out.extend(egui_shortcut_events(ctx)));
+        out
+    }
+
+    #[test]
+    fn tab_held_is_a_modifier_of_an_arrow_and_tab_alone_is_still_a_key() {
+        let ctx = egui::Context::default();
+        assert!(frame(&ctx, vec![key(egui::Key::Tab, true)]).is_empty(), "Tab down waits");
+        let arrow = frame(&ctx, vec![key(egui::Key::ArrowLeft, true), key(egui::Key::ArrowLeft, false)]);
+        assert_eq!((arrow.len(), arrow[0].tab), (1, true), "an arrow while Tab is down carries it");
+        assert!(frame(&ctx, vec![key(egui::Key::Tab, false)]).is_empty(), "Tab let go after an arrow is no key");
+        frame(&ctx, vec![key(egui::Key::Tab, true)]);
+        let alone = frame(&ctx, vec![key(egui::Key::Tab, false)]);
+        assert_eq!((alone.len(), alone[0].key.as_deref(), alone[0].tab), (1, Some("Tab"), false), "Tab alone is Tab");
+        let plain = frame(&ctx, vec![key(egui::Key::ArrowLeft, true)]);
+        assert!(!plain[0].tab, "an arrow after Tab is plain");
     }
 }
