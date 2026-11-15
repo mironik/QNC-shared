@@ -29,6 +29,9 @@ pub struct Theme {
     pub chrome_control_height: f32,
     pub chrome_pad_x: f32,
     pub chrome_pad_y: f32,
+    /// The colours of media: waves, audio lanes, the meter, the focus of a timeline and the dots
+    /// of a card (user 2026-11-15: QNC-AI clean, graphite; QNC keeps its own).
+    pub media: MediaColors,
 }
 
 impl Theme {
@@ -55,6 +58,7 @@ impl Theme {
             chrome_control_height: shell.theme_metrics.chrome_control_height,
             chrome_pad_x: f32::from(shell.theme_metrics.chrome_pad_x),
             chrome_pad_y: f32::from(shell.theme_metrics.chrome_pad_y),
+            media: colors.media.clone().unwrap_or_default(),
         }
     }
 }
@@ -212,6 +216,9 @@ pub struct ShellColors {
     pub muted: [u8; 3],
     pub accent: [u8; 3],
     pub focus: [u8; 3],
+    /// The colours of media (QNC-AI gives them; without them QNC's own).
+    #[serde(default)]
+    pub media: Option<MediaColors>,
 }
 
 /// The colours of a log read on screen (the diagnostics tool): the header row, the lines and an
@@ -225,4 +232,41 @@ pub struct LogColours {
 
 pub fn log_colours() -> LogColours {
     LogColours { header: Color32::from_rgb(220, 225, 232), text: Color32::from_rgb(205, 210, 218), error: Color32::from_rgb(255, 170, 120) }
+}
+
+/// The colours of media in a form: the audio lanes and their waves, the focus and cut of a
+/// timeline, the zones of the level meter and the dots and tick of a media card (user 2026-11-15:
+/// "minimalistički premium", QNC-AI graphite; the default is QNC's own, unchanged).
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct MediaColors {
+    pub lane: [u8; 3],
+    pub wave: [u8; 3],
+    pub wave_zoom: [u8; 3],
+    pub timeline_focus: [u8; 3],
+    pub lane_taken: [u8; 3],
+    pub meter: [[u8; 3]; 3],
+    pub dot_ready: [u8; 3],
+    pub dot_original_ready: [u8; 3],
+    pub dot_pending: [u8; 3],
+    pub dot_error: [u8; 3],
+    pub check_on: [u8; 3],
+}
+
+impl Default for MediaColors {
+    fn default() -> Self {
+        Self {
+            lane: [17, 103, 88],
+            wave: [132, 214, 158],
+            wave_zoom: [80, 190, 148],
+            timeline_focus: [255, 180, 60],
+            lane_taken: [240, 200, 40],
+            meter: [[70, 190, 110], [230, 200, 60], [220, 60, 50]],
+            dot_ready: [0x30, 0xd1, 0x58],
+            dot_original_ready: [0x0a, 0x84, 0xff],
+            dot_pending: [0xff, 0xd6, 0x0a],
+            dot_error: [0xff, 0x45, 0x3a],
+            check_on: [0xff, 0x95, 0x00],
+        }
+    }
 }

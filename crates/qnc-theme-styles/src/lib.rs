@@ -10,28 +10,30 @@ pub const MODULE_ID: &str = "qnc.module.theme-styles";
 /// The colours of every timeline (and of its trim zoom, the timeline enlarged); the gui-kit holds
 /// them (C15), the timeline only draws with them.
 pub fn timeline(theme: &Theme) -> qnc_timeline::TimelineTheme {
+    let media = &theme.media;
+    let c = qnc_desktop_theme::rgb;
     let rgb = |r, g, b| Color32::from_rgb(r, g, b);
     qnc_timeline::TimelineTheme {
         background: theme.bg,
         label_background: theme.surface_alt,
         video_background: theme.surface,
-        // Audio lanes in the colours of a story's video segment: its dark green band with
-        // the mint of its body as the wave (user 2026-10-14).
-        audio_primary_background: rgb(17, 103, 88),
-        audio_secondary_background: rgb(17, 103, 88),
+        // Audio lanes, waves, focus, meter: the media colours of the theme (QNC: a story's green
+        // segment, user 2026-10-14; QNC-AI graphite, user 2026-11-15).
+        audio_primary_background: c(media.lane),
+        audio_secondary_background: c(media.lane),
         border: theme.border_soft,
         text: theme.text,
         muted: theme.text_muted,
         playhead: theme.accent,
-        focus: rgb(255, 180, 60),
+        focus: c(media.timeline_focus),
         shot_range: rgb(96, 165, 250),
         in_out_dim: Color32::from_black_alpha(133),
-        wave_a1: rgb(132, 214, 158),
-        wave_a2: rgb(132, 214, 158),
-        wave_a3: rgb(132, 214, 158),
-        wave_a4: rgb(132, 214, 158),
-        audio_wave: rgb(80, 190, 148),
-        lane_taken: rgb(240, 200, 40),
+        wave_a1: c(media.wave),
+        wave_a2: c(media.wave),
+        wave_a3: c(media.wave),
+        wave_a4: c(media.wave),
+        audio_wave: c(media.wave_zoom),
+        lane_taken: c(media.lane_taken),
         lane_silent: rgb(200, 45, 45),
         marker_hover: rgb(230, 40, 40),
         level_marks: [
@@ -43,7 +45,7 @@ pub fn timeline(theme: &Theme) -> qnc_timeline::TimelineTheme {
         cut: rgb(230, 30, 30),
         cut_side: rgb(255, 64, 64),
         unheard: Color32::from_rgba_premultiplied(70, 10, 10, 70),
-        meter: [rgb(70, 190, 110), rgb(230, 200, 60), rgb(220, 60, 50)],
+        meter: media.meter.map(c),
     }
 }
 
@@ -99,11 +101,11 @@ pub fn cards(theme: &Theme) -> qnc_media_card::CardStyle {
         text: theme.text,
         muted: theme.text_muted,
         select_red: theme.danger,
-        dot_ready: Color32::from_rgb(0x30, 0xd1, 0x58),
-        dot_original_ready: Color32::from_rgb(0x0a, 0x84, 0xff),
-        dot_pending: Color32::from_rgb(0xff, 0xd6, 0x0a),
-        dot_error: Color32::from_rgb(0xff, 0x45, 0x3a),
-        check_on: Color32::from_rgb(0xff, 0x95, 0x00),
+        dot_ready: qnc_desktop_theme::rgb(theme.media.dot_ready),
+        dot_original_ready: qnc_desktop_theme::rgb(theme.media.dot_original_ready),
+        dot_pending: qnc_desktop_theme::rgb(theme.media.dot_pending),
+        dot_error: qnc_desktop_theme::rgb(theme.media.dot_error),
+        check_on: qnc_desktop_theme::rgb(theme.media.check_on),
         check_mark: Color32::from_rgb(0x1a, 0x1a, 0x1a),
         check_off: Color32::from_rgba_unmultiplied(0, 0, 0, 90),
         check_off_rim: Color32::from_rgba_unmultiplied(255, 255, 255, 140),

@@ -578,6 +578,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn qnc_ai_draws_its_media_in_graphite_not_in_qncs_colours() {
+        let contracts = EditorialContracts::load("e").expect("the group e layout");
+        let media = contracts.shell.colors.media.clone().expect("QNC-AI gives its media colours");
+        assert_ne!(media, theme::MediaColors::default(), "QNC's green lanes and orange focus are QNC's");
+        assert_eq!(theme::Theme::from_contract(&contracts.shell).media, media);
+    }
+
+    #[test]
     fn ai_media_assist_has_transcribe_under_its_pool_on_the_all_tab_only() {
         let contracts = EditorialContracts::load("e").expect("the group e layout");
         let bar: Vec<_> = contracts.action_bar(POOL_ACTIONS).map(|action| action.action_id).collect();
