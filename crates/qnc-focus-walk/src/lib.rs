@@ -24,9 +24,11 @@ pub const POOL_TABS: &str = "pool_tabs";
 pub const CARDS: &str = "pool";
 pub const SOURCE_TIMELINE: &str = "source_timeline";
 pub const SOURCE_BUTTONS: &str = "source_buttons";
+/// The column of the statements made (AI Media Assist, user 2026-11-15: a new statement takes the focus).
+pub const STATEMENTS: &str = "statements";
 
 /// The panels that are lists of items.
-const LISTS: [&str; 2] = [BROWSER, CARDS];
+const LISTS: [&str; 3] = [BROWSER, CARDS, STATEMENTS];
 
 /// The passive mark of the focus: a thin frame on top of `rect`. It paints only.
 

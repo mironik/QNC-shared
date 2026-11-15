@@ -637,7 +637,17 @@ pub fn show_card_grid_focused(
         return show_card_grid(ui, style, metrics, input);
     }
     let selected = input.cards.iter().position(|card| card.id == input.selected_id);
-    let from = ui.data(|data| data.get_temp::<usize>(key)).or(selected).unwrap_or(0).min(input.cards.len() - 1);
+    // Just come into focus, or another card chosen (a new statement made, user 2026-11-15):
+    // the focus goes to the chosen card and brings it into view (a chosen card not yet in the
+    // list moves it once it is there).
+    let chosen_key = egui::Id::new((input.id_salt, "qnc-card-chosen"));
+    let chosen_now = selected.is_some() && ui.data(|data| data.get_temp::<String>(chosen_key)) != Some(input.selected_id.to_string());
+    if selected.is_some() {
+        ui.data_mut(|data| data.insert_temp(chosen_key, input.selected_id.to_string()));
+    }
+    let just_focused = ui.data(|data| data.get_temp::<usize>(key)).is_none() || chosen_now;
+    let kept = ui.data(|data| data.get_temp::<usize>(key)).filter(|_| !chosen_now);
+    let from = kept.or(selected).unwrap_or(0).min(input.cards.len() - 1);
     let shape = grid_metrics(ui.available_width().max(metrics.min_card_width), input.cards.len(), metrics);
     let page_rows = (ui.available_height() / (shape.card_h + shape.gap)).floor() as usize;
     let focused = step.map_or(from, |step| step_focus(from, step, shape.cols, input.cards.len(), page_rows));
@@ -649,7 +659,7 @@ pub fn show_card_grid_focused(
         _ => None,
     };
     let unfocused = CardGridInput { panel_focused: false, ..*input }; // the chosen clip keeps its frame
-    let clicked = grid(ui, style, metrics, &unfocused, Some(KeyFocus { index: focused, scroll: step.is_some(), color }));
+    let clicked = grid(ui, style, metrics, &unfocused, Some(KeyFocus { index: focused, scroll: step.is_some() || just_focused, color }));
     if let Some(CardGridAction::Activate(id) | CardGridAction::ToggleSelection(id)) = &clicked {
         // A click moves the keyboard to the clicked card.
         let index = input.cards.iter().position(|card| card.id == id.as_str());
