@@ -10,6 +10,7 @@ qnc-camera-profiles = { workspace = true }
 qnc-camera-profile-adapter = { workspace = true }
 qnc-sony-metadata = { workspace = true }
 qnc-camera-generic-file = { workspace = true }
+qnc-camera-qnc-base = { workspace = true }
 qnc-dev-diagnostics = { workspace = true }
 qnc-plugin-process = { workspace = true }
 qnc-record-format-plugin = { workspace = true }

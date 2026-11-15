@@ -3972,6 +3972,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "qnc-camera-qnc-base"
+version = "0.1.0"
+dependencies = [
+ "qnc-camera-adapter",
+ "qnc-camera-detector",
+ "qnc-camera-patterns",
+ "qnc-media-metadata",
+ "qnc-scanner",
+ "qnc-source-contract",
+ "qnc-source-groups",
+ "qnc-source-reader",
+ "qnc-transport-resolver",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "qnc-channel-picker"
 version = "0.1.0"
 dependencies = [
@@ -4469,6 +4486,7 @@ dependencies = [
  "qnc-camera-generic-file",
  "qnc-camera-profile-adapter",
  "qnc-camera-profiles",
+ "qnc-camera-qnc-base",
  "qnc-dev-diagnostics",
  "qnc-plugin-process",
  "qnc-record-format-plugin",

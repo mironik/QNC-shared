@@ -63,6 +63,8 @@ pub fn registry(root: &Path) -> Result<CameraRegistry, String> {
     }
     // Single files in a folder that is no card of a known camera (incoming / FTP).
     registry.register(Arc::new(qnc_camera_generic_file::GenericFile::new()))?;
+    // A QNC card base (the quasi card the tray's ingest makes), read by its QNCCARD.JSON.
+    registry.register(Arc::new(qnc_camera_qnc_base::QncBaseCard::new()))?;
     Ok(registry)
 }
 
