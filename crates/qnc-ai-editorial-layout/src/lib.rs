@@ -400,7 +400,7 @@ pub struct EditorialSourceDock {
 }
 
 /// The panels a group's `tab_order` may name.
-pub const FOCUS_PANELS: [&str; 6] = ["pool_tabs", "pool", "statements", "source_timeline", "source_buttons", "segments"];
+pub const FOCUS_PANELS: [&str; 7] = ["pool_tabs", "pool", "statements", "source_timeline", "source_buttons", "transcript", "segments"];
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct GroupComposition {
