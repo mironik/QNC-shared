@@ -18,6 +18,33 @@ pub enum TextStep {
 /// A word by its frames `[from, to)`.
 pub type WordSpan = (u64, u64);
 
+/// The rows a text is shown in, as its panel laid them out on screen (a line of the text
+/// wraps into several; user 2026-11-15: the cursor skipped rows). The panel that paints the
+/// text writes them, the keys read them; a handle shared by the clones of a view, not part of
+/// what the view says (two views are equal whatever their rows).
+#[derive(Debug, Clone, Default)]
+pub struct ShownRows(std::sync::Arc<std::sync::Mutex<Vec<Vec<WordSpan>>>>);
+
+impl ShownRows {
+    /// The rows painted now, top to bottom.
+    pub fn set(&self, rows: Vec<Vec<WordSpan>>) {
+        if let Ok(mut shown) = self.0.lock() {
+            *shown = rows;
+        }
+    }
+
+    /// The rows last painted (empty before the first paint).
+    pub fn get(&self) -> Vec<Vec<WordSpan>> {
+        self.0.lock().map(|rows| rows.clone()).unwrap_or_default()
+    }
+}
+
+impl PartialEq for ShownRows {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
 /// The keyboard on a text: the word of the cursor until the playhead goes elsewhere (a player
 /// takes a moment to reach a cued word, quick presses go on from the cursor), and the word a
 /// selection started on, while Shift moves on from it.
