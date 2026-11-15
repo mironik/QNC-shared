@@ -257,6 +257,9 @@ pub struct MediaColors {
     /// The amplitude on a dB scale from the lane's bottom instead of the mirrored peak.
     #[serde(default)]
     pub wave_amplitude: bool,
+    /// The line between an audio lane and the picture (none without it).
+    #[serde(default)]
+    pub lane_divider: Option<[u8; 3]>,
 }
 
 impl Default for MediaColors {
@@ -276,6 +279,7 @@ impl Default for MediaColors {
             level_marks: [[220, 230, 225, 70], [240, 200, 40, 150], [220, 60, 50, 170]],
             level_curve: [235, 235, 235],
             wave_amplitude: false,
+            lane_divider: None,
         }
     }
 }

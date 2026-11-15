@@ -262,6 +262,8 @@ pub struct TimelineTheme {
     pub meter: [Color32; 3],
     /// How waves are drawn (QNC mirrored, QNC-AI the amplitude on a dB scale, user 2026-11-15).
     pub wave_shape: qnc_wave_view::WaveShape,
+    /// The line between an audio lane and the picture (transparent: none).
+    pub lane_divider: Color32,
 }
 
 
@@ -1046,6 +1048,12 @@ fn paint_audio_row(
         return drag;
     }
     ui.painter().rect_filled(track_rect, 0.0, fill); // no frame: the lane meets the filmstrip
+    // QNC-AI: a line where the lane meets the picture (user 2026-11-15: "da se ne stapaju u jednu
+    // nepravilnu površinu"); A1 is over the picture, the others under it. Transparent in QNC.
+    if input.theme.lane_divider.a() > 0 {
+        let y = if lane == AudioLane::A1 { row.bottom() - 0.5 } else { row.top() + 0.5 };
+        ui.painter().hline(row.x_range(), y, Stroke::new(1.0, input.theme.lane_divider));
+    }
     let gain = lane_gain(input, lane);
     let peaks = level_lines::with_curves(peaks, if lane == AudioLane::A2 { 1 } else { 0 }, input);
     qnc_wave_view::paint_wave_shape(ui.painter(), track_rect, &peaks, gain, wave, input.theme.wave_shape, [input.theme.meter[1], input.theme.meter[2]]);
