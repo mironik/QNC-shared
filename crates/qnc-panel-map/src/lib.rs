@@ -59,23 +59,24 @@ impl PartialEq for PanelPlaces {
     }
 }
 
-/// The panel in `direction` from the panel `from`: of those whose middle lies that way, the
-/// nearest, the one that overlaps it across the direction first; `None` when there is none.
+/// The panel in `direction` from the panel `from`: of those that lie wholly beyond its edge
+/// that way (live 2026-11-15: the source timeline under the whole width was "left" of the
+/// transcript), the nearest, the one that overlaps it across the direction first; `None` when
+/// there is none.
 pub fn beside(places: &[(String, Place)], from: &str, direction: Direction) -> Option<String> {
     let (_, at) = places.iter().find(|(name, _)| name == from)?;
-    let middle = |place: &Place| ((place[0] + place[2]) / 2.0, (place[1] + place[3]) / 2.0);
-    let (x, y) = middle(at);
+    // A border drawn between two panels may overlap them by a pixel or two.
+    const SLACK: f32 = 4.0;
     places
         .iter()
         .filter(|(name, _)| name != from)
         .filter_map(|(name, place)| {
-            let (px, py) = middle(place);
             // The gap along the direction and how far apart the two are across it.
             let (along, across) = match direction {
-                Direction::Left if px < x => (at[0] - place[2], gap(at[1], at[3], place[1], place[3])),
-                Direction::Right if px > x => (place[0] - at[2], gap(at[1], at[3], place[1], place[3])),
-                Direction::Up if py < y => (at[1] - place[3], gap(at[0], at[2], place[0], place[2])),
-                Direction::Down if py > y => (place[1] - at[3], gap(at[0], at[2], place[0], place[2])),
+                Direction::Left if place[2] <= at[0] + SLACK => (at[0] - place[2], gap(at[1], at[3], place[1], place[3])),
+                Direction::Right if place[0] >= at[2] - SLACK => (place[0] - at[2], gap(at[1], at[3], place[1], place[3])),
+                Direction::Up if place[3] <= at[1] + SLACK => (at[1] - place[3], gap(at[0], at[2], place[0], place[2])),
+                Direction::Down if place[1] >= at[3] - SLACK => (place[1] - at[3], gap(at[0], at[2], place[0], place[2])),
                 _ => return None,
             };
             // Of the same gaps, the one that overlaps it most across.
@@ -115,6 +116,8 @@ mod tests {
         ];
         assert_eq!(beside(&places, "pool", Direction::Right).as_deref(), Some("transcript"));
         assert_eq!(beside(&places, "transcript", Direction::Left).as_deref(), Some("pool"), "the one beside it across, not the tabs above");
+        let wide: Vec<(String, Place)> = vec![("pool".into(), [0.0, 0.0, 400.0, 500.0]), ("transcript".into(), [400.0, 0.0, 900.0, 700.0]), ("source_timeline".into(), [0.0, 500.0, 900.0, 700.0])];
+        assert_eq!(beside(&wide, "transcript", Direction::Left).as_deref(), Some("pool"), "not the panel under both");
         assert_eq!(beside(&places, "pool", Direction::Up).as_deref(), Some("pool_tabs"));
         assert_eq!(beside(&places, "pool", Direction::Down).as_deref(), Some("source_timeline"));
         assert_eq!(beside(&places, "source_timeline", Direction::Down), None, "nothing below: no round walk");
