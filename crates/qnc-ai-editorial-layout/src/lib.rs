@@ -245,6 +245,22 @@ impl EditorialContracts {
         layout.split_place("pool-head", "transport", self.editorial.pool_head.transport_width)
     }
 
+    /// The focus panel a place of the board stands for (Alt + the arrows, a click; user
+    /// 2026-11-15), by the place's name; `None` for a place that takes no keyboard.
+    pub fn focus_place(&self, block: &str) -> Option<&'static str> {
+        match block {
+            "pool-head" => Some("pool_tabs"),
+            "clip-cards" => Some("pool"),
+            STATEMENT_CARDS => Some("statements"),
+            "source-dock" => Some("source_timeline"),
+            block => match self.panel_at(block)?.0 {
+                "transcript_panel" | "transcript_search_panel" => Some("transcript"),
+                kind if kind.ends_with("segment_panel") => Some("segments"),
+                _ => None,
+            },
+        }
+    }
+
     /// The panel kind and its tabs at place `block`: the group's right panel, or the media
     /// overlay's panel in its own place; none for any other place.
     pub fn panel_at(&self, block: &str) -> Option<(&str, &[RightPanelTab])> {

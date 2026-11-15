@@ -74,6 +74,8 @@ qnc-edit-edge = { path = "crates/qnc-edit-edge" }
 qnc-edit-step = { path = "crates/qnc-edit-step" }
 qnc-edit-verbs = { path = "crates/qnc-edit-verbs" }
 qnc-edit-words = { path = "crates/qnc-edit-words" }
+qnc-text-cursor = { path = "crates/qnc-text-cursor" }
+qnc-panel-map = { path = "crates/qnc-panel-map" }
 qnc-editorial-layout = { path = "crates/qnc-editorial-layout" }
 qnc-export-box = { path = "crates/qnc-export-box" }
 qnc-export-choice = { path = "crates/qnc-export-choice" }

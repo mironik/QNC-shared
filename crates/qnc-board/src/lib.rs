@@ -475,3 +475,13 @@ pub use frame::{show_in_frame, show_surface_in_frame, Frame, FrameBlocks};
 
 #[cfg(test)]
 mod tests;
+
+/// The places of the board that take the keyboard (`panel_of` names their panels) as piece
+/// `qnc-panel-map` keeps them, and the panel a primary click landed in now (user 2026-11-15:
+/// a click anywhere in a panel focuses it, as Alt + an arrow does).
+pub fn panel_places(ui: &egui::Ui, placed: &std::collections::HashMap<String, Rect>, panel_of: impl Fn(&str) -> Option<&'static str>) -> (Vec<(String, qnc_panel_map::Place)>, Option<String>) {
+    let places: Vec<(String, qnc_panel_map::Place)> = placed.iter().filter_map(|(block, rect)| panel_of(block).map(|panel| (panel.to_string(), [rect.min.x, rect.min.y, rect.max.x, rect.max.y]))).collect();
+    let clicked = ui.input(|input| input.pointer.primary_clicked().then(|| input.pointer.interact_pos()).flatten());
+    let clicked = clicked.and_then(|at| qnc_panel_map::under(&places, at.x, at.y));
+    (places, clicked)
+}

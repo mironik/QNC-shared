@@ -3682,6 +3682,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "qnc-ai-editorial-layout"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "qnc-action-bar-panel",
+ "qnc-board",
+ "qnc-contracts",
+ "qnc-desktop-theme",
+ "qnc-keyboard-shortcut",
+ "qnc-media-card",
+ "qnc-media-pool-panel",
+ "qnc-pool-tabs",
+ "qnc-segment-panel",
+ "qnc-ui-text",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "qnc-ai-engines"
 version = "0.1.0"
 dependencies = [
@@ -3832,6 +3851,7 @@ name = "qnc-board"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "qnc-panel-map",
  "serde",
  "serde_json",
 ]
@@ -4975,6 +4995,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "qnc-panel-map"
+version = "0.1.0"
+
+[[package]]
 name = "qnc-part-sound"
 version = "0.1.0"
 dependencies = [
@@ -5918,6 +5942,10 @@ version = "0.1.0"
 dependencies = [
  "qnc-ui-text",
 ]
+
+[[package]]
+name = "qnc-text-cursor"
+version = "0.1.0"
 
 [[package]]
 name = "qnc-text-source-editor"
