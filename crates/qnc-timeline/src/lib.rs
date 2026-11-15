@@ -1051,8 +1051,8 @@ fn paint_audio_row(
     // QNC-AI: a line where the lane meets the picture (user 2026-11-15: "da se ne stapaju u jednu
     // nepravilnu površinu"); A1 is over the picture, the others under it. Transparent in QNC.
     if input.theme.lane_divider.a() > 0 {
-        let y = if lane == AudioLane::A1 { row.bottom() - 0.5 } else { row.top() + 0.5 };
-        ui.painter().hline(row.x_range(), y, Stroke::new(1.0, input.theme.lane_divider));
+        let y = if lane == AudioLane::A1 { row.bottom() - 1.0 } else { row.top() + 1.0 };
+        ui.painter().hline(row.x_range(), y, Stroke::new(2.0, input.theme.lane_divider));
     }
     let gain = lane_gain(input, lane);
     let peaks = level_lines::with_curves(peaks, if lane == AudioLane::A2 { 1 } else { 0 }, input);
