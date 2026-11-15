@@ -118,6 +118,11 @@ impl EditorialContracts {
         (order, tabs, buttons, right)
     }
 
+    /// The pool tab the form opens on (`opening_tab`), if it names one.
+    pub fn opening_tab(&self) -> Option<&str> {
+        self.composition().opening_tab.as_deref()
+    }
+
     /// The gap between the pool tabs.
     pub fn tab_gap(&self) -> f32 {
         10.0
@@ -426,6 +431,10 @@ pub struct GroupComposition {
     /// Video AI, user 2026-10-27); none: the right panel is `right_panel` alone.
     #[serde(default)]
     pub right_panel_tabs: Vec<RightPanelTab>,
+    /// The pool tab the form opens on, always open to choose (AI Media Assist: the transcripts,
+    /// user 2026-11-15: its main work is statements from the transcripts); none: All.
+    #[serde(default)]
+    pub opening_tab: Option<String>,
     /// The panels Tab walks in this group, in order (`FOCUS_PANELS`).
     pub tab_order: Vec<String>,
     /// Tabs and transport of this group; the shared pool head when absent.
