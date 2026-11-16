@@ -8,7 +8,38 @@ use std::{
 
 pub const LOCAL_REGISTRY_URI: &str = "qnc://local/db/project_registry";
 
+/// How many times a read is tried while the database is busy (another process writes), and how
+/// long between two tries (user 2026-11-16: "dodaj ponovni pokušaj kad je baza zauzeta").
+const BUSY_TRIES: u32 = 10;
+const BUSY_PAUSE: Duration = Duration::from_millis(300);
+
+/// `read` tried again while the database is busy; any other error at once.
+fn again_while_busy<T>(mut read: impl FnMut() -> Result<T, ReadError>) -> Result<T, ReadError> {
+    let mut tried = 1;
+    loop {
+        match read() {
+            Err(error) if error.code == BUSY && tried < BUSY_TRIES => {
+                tried += 1;
+                std::thread::sleep(BUSY_PAUSE);
+            }
+            result => return result,
+        }
+    }
+}
+
+/// The code of a read refused because another process held the database.
+const BUSY: &str = "database_busy";
+
+/// Whether SQLite refused because the database is busy or locked.
+fn busy(error: &rusqlite::Error) -> bool {
+    matches!(error.sqlite_error_code(), Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked))
+}
+
 pub(crate) fn workspace_file(registry_file: &Path, id: &str) -> Result<PathBuf, ReadError> {
+    again_while_busy(|| workspace_file_once(registry_file, id))
+}
+
+fn workspace_file_once(registry_file: &Path, id: &str) -> Result<PathBuf, ReadError> {
     if id.is_empty() || id.contains(['/', '\\', ':']) || matches!(id, "." | "..") {
         return Err(db_error());
     }
@@ -74,6 +105,10 @@ fn bound_path(resolver: &ResolverConfig, uri: &str) -> Result<PathBuf, ReadError
 }
 
 pub(crate) fn read(registry_file: &Path, context_uri: &str, pinned: Option<&str>) -> Result<WorkSettings, ReadError> {
+    again_while_busy(|| read_once(registry_file, context_uri, pinned))
+}
+
+fn read_once(registry_file: &Path, context_uri: &str, pinned: Option<&str>) -> Result<WorkSettings, ReadError> {
     let context = crate::registry_context(context_uri)?;
     let resolver =
         ResolverConfig::new(PathBuf::new()).with_local_binding(LOCAL_REGISTRY_URI, registry_file);
@@ -141,11 +176,9 @@ pub(crate) fn read(registry_file: &Path, context_uri: &str, pinned: Option<&str>
             [&active],
             |r| r.get(0),
         )
-        .map_err(|_| {
-            ReadError::new(
-                "settings_not_public",
-                "The public view of the database holds no work settings.",
-            )
+        .map_err(|error| match busy(&error) {
+            true => db_err(error),
+            false => ReadError::new("settings_not_public", "The public view of the database holds no work settings."),
         })?;
     let settings = serde_json::from_str(&settings).map_err(db_err)?;
     let snapshot = WorkSettings::from_saved(
@@ -161,6 +194,35 @@ pub(crate) fn read(registry_file: &Path, context_uri: &str, pinned: Option<&str>
 
 /// As [`db_error`], with what the database said (user 2026-11-16: the worker logged only "lacks
 /// the public view", the real cause was thrown away).
-fn db_err(error: impl std::fmt::Display) -> ReadError {
+/// A busy or locked database is `database_busy` (tried again); anything else is the contract error.
+fn db_err(error: impl std::fmt::Display + 'static) -> ReadError {
+    let sqlite = (&error as &dyn std::any::Any).downcast_ref::<rusqlite::Error>();
+    if sqlite.is_some_and(busy) {
+        return ReadError::new(BUSY, &format!("The database is busy (another process writes): {error}"));
+    }
     ReadError::new("database_contract", &format!("The database lacks the public view or cannot be read: {error}"))
+}
+
+#[cfg(test)]
+mod busy_tests {
+    use super::*;
+
+    #[test]
+    fn a_busy_database_is_tried_again_another_error_is_not() {
+        let mut calls = 0;
+        let read = again_while_busy(|| {
+            calls += 1;
+            if calls < 3 { Err(ReadError::new(BUSY, "busy")) } else { Ok(calls) }
+        });
+        assert_eq!(read.unwrap(), 3);
+        let mut calls = 0;
+        let read: Result<(), ReadError> = again_while_busy(|| {
+            calls += 1;
+            Err(ReadError::new("database_contract", "no view"))
+        });
+        assert!(read.is_err());
+        assert_eq!(calls, 1, "only a busy database is tried again");
+        let busy_error = rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY), None);
+        assert_eq!(db_err(busy_error).code, BUSY);
+    }
 }
