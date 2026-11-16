@@ -19,6 +19,13 @@ pub const WORKER_EXECUTABLE: &str = "qnc-ingest-worker";
 
 /// Makes sure the worker of the project `target` runs.
 pub fn wake(root: &Path, target: &ContentTarget) -> Result<(), String> {
+    wake_for(root, target, None)
+}
+
+/// As [`wake`], the worker given the project it works in (`--project`, user 2026-11-16: "gdje
+/// će se rezultati njihova rada snimati određuju Orkestratori"); `None` leaves it the project
+/// its database names. A worker that knows no `--project` passes it by.
+pub fn wake_for(root: &Path, target: &ContentTarget, project_id: Option<&str>) -> Result<(), String> {
     if qnc_playback_activity::is_fresh(target, qnc_playback_activity::WORKER, qnc_playback_activity::WORKER_FRESH_SECONDS) {
         return Ok(());
     }
@@ -26,9 +33,11 @@ pub fn wake(root: &Path, target: &ContentTarget) -> Result<(), String> {
         qnc_ui_text::fill("app.helper_missing", &[("name", WORKER_EXECUTABLE), ("package", "-p qnc-ingest-worker")])
     })?;
     let mut command = qnc_plugin_process::background_command(&executable);
+    command.arg("--root").arg(root);
+    if let Some(project_id) = project_id {
+        command.arg("--project").arg(project_id);
+    }
     command
-        .arg("--root")
-        .arg(root)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
