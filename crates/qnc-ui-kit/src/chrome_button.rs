@@ -30,7 +30,7 @@ pub fn chrome_button(ui: &mut Ui, text: &str, enabled: bool, on: bool, style: Ch
 pub fn strong_button(ui: &mut Ui, text: &str, enabled: bool, fill: Color32, height: f32) -> egui::Response {
     let response = ui.add_enabled(
         enabled,
-        Button::new(RichText::new(text).color(Color32::WHITE).strong())
+        Button::new(RichText::new(text).color(text_on(fill)).strong())
             .fill(fill)
             .stroke(Stroke::new(0.0, Color32::TRANSPARENT))
             .corner_radius(CornerRadius::same(0))
@@ -149,4 +149,25 @@ pub fn press_feedback(ui: &Ui, response: egui::Response) -> egui::Response {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     response
+}
+
+/// The text colour readable on a button's `fill` (user 2026-11-16: "ispravi paletu boja gumba,
+/// to treba imati zajednički stil"): white on a dark or saturated fill, the dark of the desktop on
+/// a light one (a light accent drew white text on light grey).
+pub fn text_on(fill: Color32) -> Color32 {
+    let [r, g, b, _] = fill.to_array();
+    let light = (0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b)) / 255.0;
+    if light > 0.65 { Color32::from_rgb(11, 15, 25) } else { Color32::WHITE }
+}
+
+#[cfg(test)]
+mod text_on_tests {
+    use super::*;
+
+    #[test]
+    fn a_light_fill_gets_dark_text_a_dark_or_green_one_white() {
+        assert_eq!(text_on(Color32::from_rgb(200, 201, 204)), Color32::from_rgb(11, 15, 25));
+        assert_eq!(text_on(Color32::from_rgb(16, 185, 129)), Color32::WHITE, "QNC's green stays white");
+        assert_eq!(text_on(Color32::from_rgb(40, 40, 40)), Color32::WHITE);
+    }
 }
