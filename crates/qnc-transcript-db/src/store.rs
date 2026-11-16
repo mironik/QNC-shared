@@ -54,6 +54,8 @@ impl Store {
             Operation::ReadTranscribed => self.read_transcribed(),
             Operation::ReadSpoken if !self.schema_ready => Ok(Data::Clips(Vec::new())),
             Operation::ReadSpoken => self.read_spoken(),
+            Operation::ReadSpans if !self.schema_ready => Ok(Data::Spans(Vec::new())),
+            Operation::ReadSpans => self.read_spans(),
             Operation::ClearDone => self.clear_done(),
             Operation::ForgetClip { clip_id } => self.forget_clip(clip_id),
         }
@@ -88,6 +90,14 @@ impl Store {
         let mut statement = self.conn.prepare("SELECT DISTINCT clip_id FROM public_clip_transcripts ORDER BY clip_id").map_err(err)?;
         let rows = statement.query_map([], |row| row.get::<_, String>(0)).map_err(err)?;
         Ok(Data::Clips(rows.collect::<std::result::Result<_, _>>().map_err(err)?))
+    }
+
+    fn read_spans(&mut self) -> Result<Data> {
+        let mut statement = self.conn.prepare("SELECT clip_id, from_frame, to_frame, engine FROM public_clip_transcripts ORDER BY clip_id, from_frame").map_err(err)?;
+        let rows = statement
+            .query_map([], |row| Ok(Span { clip_id: row.get(0)?, from_frame: row.get::<_, i64>(1)?.max(0) as u64, to_frame: row.get::<_, i64>(2)?.max(0) as u64, engine: row.get(3)? }))
+            .map_err(err)?;
+        Ok(Data::Spans(rows.collect::<std::result::Result<_, _>>().map_err(err)?))
     }
 
     fn clear_done(&mut self) -> Result<Data> {

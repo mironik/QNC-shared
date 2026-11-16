@@ -192,6 +192,8 @@ pub enum Operation {
     /// The clips whose kept transcript has words (user 2026-11-13: a clip without speech is
     /// transcribed, but has no place in the Transcript tab).
     ReadSpoken,
+    /// The range and the engine of every kept transcript (the fine pass finds what it did not hear).
+    ReadSpans,
     /// Everything transcribed of a clip goes, and its entry of the queue (user 2026-11-09: the X
     /// on its card); the statements chosen from it stay. Refused while the clip is transcribed.
     ForgetClip { clip_id: String },
@@ -213,6 +215,7 @@ pub enum Data {
     Queue(Vec<Queued>),
     Quotes(Vec<Quote>),
     Clips(Vec<String>),
+    Spans(Vec<Span>),
     Changed,
 }
 
@@ -351,3 +354,62 @@ pub fn spoken_share(transcripts: &[ClipTranscript], from: u64, to: u64) -> Optio
 
 #[cfg(test)]
 mod tests;
+
+/// The range of clip frames `[from_frame, to_frame)` a kept transcript says, and its engine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Span {
+    pub clip_id: String,
+    pub from_frame: u64,
+    pub to_frame: u64,
+    pub engine: String,
+}
+
+/// The range and the engine of every kept transcript of the project behind `target`.
+pub fn read_spans(target: &ProjectDbTarget) -> Result<Vec<Span>> {
+    let mut client = target.open(Access::ReadOnly, vec![TranscriptModule::factory()])?;
+    let answer = client.execute(MODULE_ID, encode(&Operation::ReadSpans)?)?;
+    match serde_json::from_value(answer).map_err(|e| e.to_string())? {
+        Data::Spans(spans) => Ok(spans),
+        _ => Err(qnc_ui_text::text("db.transcript_reply").into()),
+    }
+}
+
+/// What the fine pass has still to hear (user 2026-11-16: after the rough transcript of
+/// Parakeet the Croatian model goes over everything in the background): of each clip, the frames
+/// a kept transcript says that no transcript made by an engine whose name has `fine` in it says,
+/// as ranges of `least` frames or more, in clip and frame order.
+pub fn not_heard_by(spans: &[Span], fine: &str, least: u64) -> Vec<(String, u64, u64)> {
+    let mut clips: Vec<&str> = spans.iter().map(|span| span.clip_id.as_str()).collect();
+    clips.sort_unstable();
+    clips.dedup();
+    let mut left = Vec::new();
+    for clip in clips {
+        let union = |keep: &dyn Fn(&Span) -> bool| {
+            let mut ranges: Vec<(u64, u64)> = spans.iter().filter(|span| span.clip_id == clip && keep(span)).map(|span| (span.from_frame, span.to_frame)).collect();
+            ranges.sort_unstable();
+            let mut merged: Vec<(u64, u64)> = Vec::new();
+            for (from, to) in ranges {
+                match merged.last_mut() {
+                    Some(last) if from <= last.1 => last.1 = last.1.max(to),
+                    _ => merged.push((from, to)),
+                }
+            }
+            merged
+        };
+        let heard = union(&|span: &Span| span.engine.contains(fine));
+        for (from, to) in union(&|_: &Span| true) {
+            let mut at = from;
+            for &(heard_from, heard_to) in heard.iter().filter(|(a, b)| *b > from && *a < to) {
+                if heard_from > at && heard_from - at >= least {
+                    left.push((clip.to_string(), at, heard_from));
+                }
+                at = at.max(heard_to);
+            }
+            if to > at && to - at >= least {
+                left.push((clip.to_string(), at, to));
+            }
+        }
+    }
+    left
+}

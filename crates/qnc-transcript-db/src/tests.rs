@@ -213,3 +213,16 @@ fn a_word_cut_into_a_range_ends_at_its_edges() {
     assert_eq!((cut[0].from, cut[0].to), (236, 328));
     assert_eq!(cut[0].words.iter().map(|w| (w.from, w.to)).collect::<Vec<_>>(), vec![(236, 250), (314, 328)]);
 }
+
+#[test]
+fn the_fine_pass_hears_what_only_the_rough_one_heard() {
+    let span = |clip: &str, from: u64, to: u64, engine: &str| Span { clip_id: clip.into(), from_frame: from, to_frame: to, engine: engine.into() };
+    let spans = [
+        span("a", 0, 1000, "parakeet m"),
+        span("a", 200, 300, "wav2vec2 parlaspeech"),
+        span("a", 290, 600, "wav2vec2 parlaspeech"),
+        span("b", 0, 500, "wav2vec2 parlaspeech"),
+        span("c", 0, 30, "parakeet m"),
+    ];
+    assert_eq!(crate::not_heard_by(&spans, "parlaspeech", 25), vec![("a".into(), 0, 200), ("a".into(), 600, 1000), ("c".into(), 0, 30)]);
+}
