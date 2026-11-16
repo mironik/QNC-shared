@@ -4755,6 +4755,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "qnc-media-checksum"
+version = "0.1.0"
+
+[[package]]
 name = "qnc-media-decode"
 version = "0.2.0"
 dependencies = [

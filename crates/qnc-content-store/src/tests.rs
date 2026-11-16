@@ -498,6 +498,7 @@ fn reselection_preserves_import_and_never_replaces_final_metadata() {
             thumbnail_uri: None,
             copy_of: None,
             optimized: None,
+            checksum: None,
             error: None,
         },
     )
@@ -857,6 +858,7 @@ fn a_heartbeat_keeps_the_lease_alive_and_needs_a_running_import() {
             thumbnail_uri: None,
             copy_of: None,
             optimized: None,
+            checksum: None,
             error: None,
         },
     )
@@ -887,6 +889,7 @@ fn an_imported_poster_replaces_the_card_poster_and_survives_a_new_select() {
             thumbnail_uri: Some(poster_uri()),
             copy_of: None,
             optimized: None,
+            checksum: None,
             error: None,
         },
     )
@@ -980,6 +983,7 @@ fn an_imported_copy_records_which_representation_it_copies() {
             thumbnail_uri: None,
             copy_of: Some(ImportedCopy::Original),
             optimized: None,
+            checksum: None,
             error: Some("x".into()),
         },
     )
@@ -992,6 +996,7 @@ fn an_imported_copy_records_which_representation_it_copies() {
             thumbnail_uri: None,
             copy_of: Some(ImportedCopy::Original),
             optimized: None,
+            checksum: None,
             error: None,
         },
     )
@@ -1020,6 +1025,7 @@ fn an_optimized_copy_is_kept_with_its_description() {
             thumbnail_uri: None,
             copy_of: None,
             optimized: Some(optimized.clone()),
+            checksum: None,
             error: None,
         },
     )

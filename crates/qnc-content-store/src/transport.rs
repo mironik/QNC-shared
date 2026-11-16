@@ -275,15 +275,22 @@ impl ContentClient {
         optimized: Option<qnc_media_metadata::MediaRepresentation>,
         error: Option<String>,
     ) -> Result<()> {
-        self.execute(Operation::FinishImport {
-            clip_id,
-            media_uri,
-            thumbnail_uri,
-            copy_of,
-            optimized,
-            error,
-        })
-        .map(|_| ())
+        self.finish_import_checked(clip_id, media_uri, thumbnail_uri, copy_of, optimized, None, error)
+    }
+
+    /// As `finish_import`, with the checksum the copy was proven by (2026-11-16).
+    #[allow(clippy::too_many_arguments)]
+    pub fn finish_import_checked(
+        &mut self,
+        clip_id: String,
+        media_uri: Option<String>,
+        thumbnail_uri: Option<String>,
+        copy_of: Option<ImportedCopy>,
+        optimized: Option<qnc_media_metadata::MediaRepresentation>,
+        checksum: Option<String>,
+        error: Option<String>,
+    ) -> Result<()> {
+        self.execute(Operation::FinishImport { clip_id, media_uri, thumbnail_uri, copy_of, optimized, checksum, error }).map(|_| ())
     }
     fn execute(&mut self, operation: Operation) -> Result<Data> {
         if operation.is_write() && self.access == Access::ReadOnly {
@@ -453,17 +460,23 @@ impl ContentWriteTransport {
         optimized: Option<qnc_media_metadata::MediaRepresentation>,
         error: Option<String>,
     ) -> Result<()> {
-        self.send_operation(
-            key,
-            Operation::FinishImport {
-                clip_id,
-                media_uri,
-                thumbnail_uri,
-                copy_of,
-                optimized,
-                error,
-            },
-        )
+        self.finish_import_checked(key, clip_id, media_uri, thumbnail_uri, copy_of, optimized, None, error)
+    }
+
+    /// As `finish_import`, with the checksum the copy was proven by (2026-11-16).
+    #[allow(clippy::too_many_arguments)]
+    pub fn finish_import_checked(
+        &mut self,
+        key: String,
+        clip_id: String,
+        media_uri: Option<String>,
+        thumbnail_uri: Option<String>,
+        copy_of: Option<ImportedCopy>,
+        optimized: Option<qnc_media_metadata::MediaRepresentation>,
+        checksum: Option<String>,
+        error: Option<String>,
+    ) -> Result<()> {
+        self.send_operation(key, Operation::FinishImport { clip_id, media_uri, thumbnail_uri, copy_of, optimized, checksum, error })
     }
 
     fn send_operation(&mut self, key: String, operation: Operation) -> Result<()> {
@@ -597,9 +610,10 @@ fn execute_write_command(
             thumbnail_uri,
             copy_of,
             optimized,
+            checksum,
             error,
         } => {
-            client.finish_import(clip_id, media_uri, thumbnail_uri, copy_of, optimized, error)?;
+            client.finish_import_checked(clip_id, media_uri, thumbnail_uri, copy_of, optimized, checksum, error)?;
             Ok(ContentWriteData::Changed)
         }
         Operation::SetPoster { clip_id, thumbnail_uri } => {

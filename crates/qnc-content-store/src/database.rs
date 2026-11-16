@@ -16,6 +16,8 @@ pub struct ContentStore {
     has_copy_of: bool,
     /// Whether the catalog says what kind each clip is (`camera` or `voice`).
     has_kind: bool,
+    /// Whether the catalog keeps the checksum a copy was proven by.
+    has_checksum: bool,
 }
 
 impl ContentStore {
@@ -139,6 +141,7 @@ impl ContentStore {
             && has_column(&conn, "clips", "imported_copy_of")?
             && has_column(&conn, "clips", "optimized_json")?;
         let has_kind = schema && has_column(&conn, "clips", "clip_kind")?;
+        let has_checksum = schema && has_column(&conn, "clips", "copy_checksum")?;
         if access == Access::ReadOnly {
             conn.pragma_update(None, "query_only", true).map_err(err)?;
         }
@@ -169,6 +172,7 @@ impl ContentStore {
             has_thumbnail_uri,
             has_copy_of,
             has_kind,
+            has_checksum,
         })
     }
 
@@ -538,6 +542,7 @@ impl ContentStore {
                 thumbnail_uri,
                 copy_of,
                 optimized,
+                checksum,
                 error,
             } => {
                 if media_uri.is_some() == error.is_some() {
@@ -583,6 +588,10 @@ impl ContentStore {
                 .map_err(err)?;
                 if n != 1 {
                     return Err(qnc_ui_text::text("db.import_job_taken_already_finished").into());
+                }
+                // The checksum the copy was proven by, where the catalog keeps it (2026-11-16).
+                if checksum.is_some() && self.has_checksum {
+                    self.conn.execute("UPDATE clips SET copy_checksum=?2 WHERE clip_id=?1", params![clip_id, checksum]).map_err(err)?;
                 }
                 Ok(Data::Changed)
             }
@@ -944,6 +953,10 @@ fn ensure_copy_column(conn: &Connection) -> Result<()> {
     // The optimized copy the import made (its probed description, JSON), user 2026-10-09.
     if !has_column(conn, "clips", "optimized_json")? {
         conn.execute("ALTER TABLE clips ADD COLUMN optimized_json TEXT", []).map_err(err)?;
+    }
+    // The checksum the copy was proven by, `kind:hex` (user 2026-11-16: a verified offload).
+    if !has_column(conn, "clips", "copy_checksum")? {
+        conn.execute("ALTER TABLE clips ADD COLUMN copy_checksum TEXT", []).map_err(err)?;
     }
     Ok(())
 }

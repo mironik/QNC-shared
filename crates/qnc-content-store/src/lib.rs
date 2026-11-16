@@ -273,6 +273,9 @@ pub enum Operation {
         /// The optimized copy the import made, with its probed description.
         #[serde(default)]
         optimized: Option<qnc_media_metadata::MediaRepresentation>,
+        /// The checksum the copy was proven by (`kind:hex`, `qnc-media-checksum`), when copied.
+        #[serde(default)]
+        checksum: Option<String>,
         error: Option<String>,
     },
 }

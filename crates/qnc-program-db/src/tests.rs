@@ -170,6 +170,7 @@ fn imported_store(path: &Path) -> Story {
             thumbnail_uri: None,
             copy_of: None,
             optimized: None,
+            checksum: None,
             error: None,
         },
     )
