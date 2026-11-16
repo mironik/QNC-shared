@@ -202,3 +202,14 @@ fn statements_are_kept_in_the_order_added_and_one_can_go() {
     delete_quote(&target, kept[0].id).unwrap();
     assert_eq!(read_quotes(&target).unwrap().iter().map(|q| q.from_frame).collect::<Vec<_>>(), [100]);
 }
+
+#[test]
+fn a_word_cut_into_a_range_ends_at_its_edges() {
+    let word = |from: u64, to: u64, text: &str| Word { from, to, text: text.into() };
+    // "Pa" before the range, "dosad" across its start (middle inside), "njih" across its end.
+    let line = Line { from: 220, to: 340, text: "Pa dosad njih".into(), words: vec![word(220, 230, "Pa"), word(232, 250, "dosad"), word(314, 336, "njih")] };
+    let cut = crate::lines_cut(&[line], 236, 328, true);
+    assert_eq!(cut.len(), 1);
+    assert_eq!((cut[0].from, cut[0].to), (236, 328));
+    assert_eq!(cut[0].words.iter().map(|w| (w.from, w.to)).collect::<Vec<_>>(), vec![(236, 250), (314, 328)]);
+}

@@ -73,6 +73,17 @@ pub fn lines_cut(lines: &[Line], from: u64, to: u64, inside: bool) -> Vec<Line> 
         }
         flush(&mut run);
     }
+    // Inside, a word whose middle is in the range but an edge outside it ends at the range's
+    // edge (live 2026-11-16: a statement transcribed again from a second earlier kept such a word
+    // and its transcript was refused for running past its range).
+    if inside {
+        for line in &mut cut {
+            for word in &mut line.words {
+                (word.from, word.to) = (word.from.clamp(from, to), word.to.clamp(from, to));
+            }
+            (line.from, line.to) = (line.from.clamp(from, to), line.to.clamp(from, to));
+        }
+    }
     cut
 }
 
