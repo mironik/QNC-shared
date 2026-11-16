@@ -20,7 +20,7 @@ pub(crate) fn workspace_file(registry_file: &Path, id: &str) -> Result<PathBuf, 
             [id],
             |r| r.get(0),
         )
-        .map_err(|_| db_error())?;
+        .map_err(db_err)?;
     let directory = PathBuf::from(path);
     if !directory.is_absolute() {
         return Err(db_error());
@@ -33,7 +33,7 @@ pub(crate) fn workspace_file(registry_file: &Path, id: &str) -> Result<PathBuf, 
             [id],
             |r| r.get(0),
         )
-        .map_err(|_| db_error())?;
+        .map_err(db_err)?;
     if !matches {
         return Err(db_error());
     }
@@ -52,10 +52,10 @@ fn open_read_only(path: &Path) -> Result<Connection, ReadError> {
         )
     })?;
     conn.busy_timeout(Duration::from_secs(2))
-        .map_err(|_| db_error())?;
+        .map_err(db_err)?;
     // Connection-local guard only; never create, repair or configure journal files.
     conn.pragma_update(None, "query_only", true)
-        .map_err(|_| db_error())?;
+        .map_err(db_err)?;
     Ok(conn)
 }
 
@@ -67,7 +67,7 @@ fn db_error() -> ReadError {
 }
 
 fn bound_path(resolver: &ResolverConfig, uri: &str) -> Result<PathBuf, ReadError> {
-    match resolver.resolve(uri).map_err(|_| db_error())?.endpoint {
+    match resolver.resolve(uri).map_err(db_err)?.endpoint {
         ResolvedEndpoint::LocalPath(path) => Ok(path),
         _ => Err(db_error()),
     }
@@ -78,7 +78,7 @@ pub(crate) fn read(registry_file: &Path, context_uri: &str, pinned: Option<&str>
     let resolver =
         ResolverConfig::new(PathBuf::new()).with_local_binding(LOCAL_REGISTRY_URI, registry_file);
     let mut registry = open_read_only(&bound_path(&resolver, LOCAL_REGISTRY_URI)?)?;
-    let tx = registry.transaction().map_err(|_| db_error())?;
+    let tx = registry.transaction().map_err(db_err)?;
     // A process given the project it works on (QNC-AI: the ingest of one card into its own base,
     // chosen by the tray from the bases' registry, user 2026-11-14) reads that project; every
     // other process the one the database marks active.
@@ -91,7 +91,7 @@ pub(crate) fn read(registry_file: &Path, context_uri: &str, pinned: Option<&str>
                 |r| r.get(0),
             )
             .optional()
-            .map_err(|_| db_error())?,
+            .map_err(db_err)?,
     };
     let active = active.filter(|id| !id.is_empty()).ok_or_else(|| {
         ReadError::new("no_active_project", "No active project is chosen in the database.")
@@ -105,8 +105,8 @@ pub(crate) fn read(registry_file: &Path, context_uri: &str, pinned: Option<&str>
             [&active],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
-        .map_err(|_| db_error())?;
-    let public_uri = qnc_contracts::parse_qnc_uri(&project_uri).map_err(|_| db_error())?;
+        .map_err(db_err)?;
+    let public_uri = qnc_contracts::parse_qnc_uri(&project_uri).map_err(db_err)?;
     if public_uri.resource_kind != "project" || public_uri.resource_id != active {
         return Err(db_error());
     }
@@ -147,7 +147,7 @@ pub(crate) fn read(registry_file: &Path, context_uri: &str, pinned: Option<&str>
                 "The public view of the database holds no work settings.",
             )
         })?;
-    let settings = serde_json::from_str(&settings).map_err(|_| db_error())?;
+    let settings = serde_json::from_str(&settings).map_err(db_err)?;
     let snapshot = WorkSettings::from_saved(
         active.clone(),
         name,
@@ -155,6 +155,12 @@ pub(crate) fn read(registry_file: &Path, context_uri: &str, pinned: Option<&str>
         format!("{context}/project/{active}"),
         settings,
     )?;
-    tx.commit().map_err(|_| db_error())?;
+    tx.commit().map_err(db_err)?;
     Ok(snapshot)
+}
+
+/// As [`db_error`], with what the database said (user 2026-11-16: the worker logged only "lacks
+/// the public view", the real cause was thrown away).
+fn db_err(error: impl std::fmt::Display) -> ReadError {
+    ReadError::new("database_contract", &format!("The database lacks the public view or cannot be read: {error}"))
 }
