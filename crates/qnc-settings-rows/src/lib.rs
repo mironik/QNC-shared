@@ -33,7 +33,7 @@ fn button(ui: &mut egui::Ui, label: &str, enabled: bool, look: qnc_ui_kit::Butto
 /// The main button of a row (Create, Save, Choose).
 pub fn primary_btn(ui: &mut egui::Ui, label: &str, enabled: bool, theme: &Theme) -> egui::Response {
     let min_size = Vec2::new(0.0, theme.chrome_control_height);
-    let look = qnc_ui_kit::ButtonLook { text: qnc_ui_kit::text_on(theme.accent), fill: theme.accent, border: None, font_size: Some(theme.font_ui), strong: true, square: false, min_size };
+    let look = qnc_ui_kit::ButtonLook { text: Color32::WHITE, fill: theme.accent, border: None, font_size: Some(theme.font_ui), strong: true, square: false, min_size };
     button(ui, label, enabled, look)
 }
 
@@ -46,7 +46,7 @@ pub fn action_btn(ui: &mut egui::Ui, label: &str, theme: &Theme) -> egui::Respon
 
 /// The accent button inside a row (e.g. Save as preset): no minimum height.
 pub fn accent_btn(ui: &mut egui::Ui, label: &str, enabled: bool, theme: &Theme) -> egui::Response {
-    let look = qnc_ui_kit::ButtonLook { text: qnc_ui_kit::text_on(theme.accent), fill: theme.accent, border: None, font_size: Some(theme.font_ui), strong: false, square: false, min_size: Vec2::ZERO };
+    let look = qnc_ui_kit::ButtonLook { text: Color32::WHITE, fill: theme.accent, border: None, font_size: Some(theme.font_ui), strong: false, square: false, min_size: Vec2::ZERO };
     button(ui, label, enabled, look)
 }
 

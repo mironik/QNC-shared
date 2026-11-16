@@ -28,11 +28,12 @@ pub fn chrome_button(ui: &mut Ui, text: &str, enabled: bool, on: bool, style: Ch
 
 /// The one strong button of a row (e.g. Uvezi): white bold text on the accent fill.
 pub fn strong_button(ui: &mut Ui, text: &str, enabled: bool, fill: Color32, height: f32) -> egui::Response {
+    let (fill, colour, frame) = on_dark(fill, Color32::WHITE);
     let response = ui.add_enabled(
         enabled,
-        Button::new(RichText::new(text).color(text_on(fill)).strong())
+        Button::new(RichText::new(text).color(colour).strong())
             .fill(fill)
-            .stroke(Stroke::new(0.0, Color32::TRANSPARENT))
+            .stroke(frame.map_or(Stroke::new(0.0, Color32::TRANSPARENT), |frame| Stroke::new(1.0, frame)))
             .corner_radius(CornerRadius::same(0))
             .min_size(Vec2::new(0.0, height)),
     );
@@ -62,7 +63,9 @@ pub struct ButtonLook {
 }
 
 /// A button drawn as `look` says.
-pub fn look_button(ui: &mut Ui, text: &str, enabled: bool, look: ButtonLook) -> egui::Response {
+pub fn look_button(ui: &mut Ui, text: &str, enabled: bool, mut look: ButtonLook) -> egui::Response {
+    let (fill, colour, frame) = on_dark(look.fill, look.text);
+    (look.fill, look.text, look.border) = (fill, colour, frame.or(look.border));
     let mut rich = RichText::new(text).color(look.text);
     if let Some(size) = look.font_size {
         rich = rich.size(size);
@@ -151,23 +154,31 @@ pub fn press_feedback(ui: &Ui, response: egui::Response) -> egui::Response {
     response
 }
 
-/// The text colour readable on a button's `fill` (user 2026-11-16: "ispravi paletu boja gumba,
-/// to treba imati zajednički stil"): white on a dark or saturated fill, the dark of the desktop on
-/// a light one (a light accent drew white text on light grey).
-pub fn text_on(fill: Color32) -> Color32 {
+/// A button on the dark desktop (user 2026-11-16: "ova tema je tamna, na njoj ne smije biti
+/// bijelih dugmadi"): a light fill is drawn as the dark of its own colour, that colour the text
+/// and the frame; a dark or saturated fill (QNC's green) stays as it is with its text. Gives the
+/// fill, the text and the frame.
+pub fn on_dark(fill: Color32, text: Color32) -> (Color32, Color32, Option<Color32>) {
     let [r, g, b, _] = fill.to_array();
     let light = (0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b)) / 255.0;
-    if light > 0.65 { Color32::from_rgb(11, 15, 25) } else { Color32::WHITE }
+    if light <= 0.65 {
+        return (fill, text, None);
+    }
+    let dark = |value: u8| (f32::from(value) * 0.16).round() as u8;
+    (Color32::from_rgb(dark(r), dark(g), dark(b)), fill, Some(fill))
 }
 
 #[cfg(test)]
-mod text_on_tests {
+mod on_dark_tests {
     use super::*;
 
     #[test]
-    fn a_light_fill_gets_dark_text_a_dark_or_green_one_white() {
-        assert_eq!(text_on(Color32::from_rgb(200, 201, 204)), Color32::from_rgb(11, 15, 25));
-        assert_eq!(text_on(Color32::from_rgb(16, 185, 129)), Color32::WHITE, "QNC's green stays white");
-        assert_eq!(text_on(Color32::from_rgb(40, 40, 40)), Color32::WHITE);
+    fn a_light_fill_turns_dark_with_its_colour_as_text_and_frame_a_dark_or_green_one_stays() {
+        let grey = Color32::from_rgb(200, 201, 204);
+        let (fill, text, frame) = on_dark(grey, Color32::WHITE);
+        assert!(fill.r() < 40 && fill.g() < 40 && fill.b() < 40, "dark: {fill:?}");
+        assert_eq!((text, frame), (grey, Some(grey)));
+        let green = Color32::from_rgb(16, 185, 129);
+        assert_eq!(on_dark(green, Color32::WHITE), (green, Color32::WHITE, None), "QNC's green stays");
     }
 }
