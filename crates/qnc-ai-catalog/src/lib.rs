@@ -80,7 +80,7 @@ struct File {
     /// A sentence of what a shot shows (user 2026-11-10: Florence-2 as the second AI engine); a
     /// host without it has none.
     #[serde(default)]
-    shot_caption: Option<LettersJob>,
+    shot_caption: Option<CaptionJob>,
     /// A translation of the words of a story into English (user 2026-11-11: "the OFF into English",
     /// so that SigLIP 2 finds the pictures and the captions of its words); a host without it has
     /// none.
@@ -148,6 +148,8 @@ pub struct ShotCaptioner {
     pub program: String,
     /// The model's folder.
     pub model: PathBuf,
+    /// Where it runs: one of [`CAPTION_BACKENDS`].
+    pub backend: String,
 }
 
 impl ShotCaptioner {
@@ -171,7 +173,11 @@ pub fn shot_captioner(path: &Path) -> Result<ShotCaptioner, String> {
     if !model_here(&model) {
         return Err(format!("shot captioner: the model {} is not on this host", model.display()));
     }
-    Ok(ShotCaptioner { program: job.program, model })
+    let backend = job.backend.unwrap_or_else(|| "cpu".into());
+    if !CAPTION_BACKENDS.contains(&backend.as_str()) {
+        return Err(format!("shot captioner: unknown backend {backend}"));
+    }
+    Ok(ShotCaptioner { program: job.program, model, backend })
 }
 
 /// The engine that makes the in-between pictures of a smooth cut on this host.
@@ -198,6 +204,21 @@ pub fn frame_interpolator(path: &Path) -> Result<FrameInterpolator, String> {
         return Err(format!("frame interpolator: the model {} is not on this host", model.display()));
     }
     Ok(FrameInterpolator { program: job.program, model })
+}
+
+/// Where the shot captioner runs on this host (user 2026-11-17: Florence on the graphics card;
+/// measured on Iris Xe: its fp32 vision part 2.3 times faster than the processor, the processor
+/// left free). DirectML is Windows' own, any DirectX 12 card (Intel, AMD, NVIDIA).
+pub const CAPTION_BACKENDS: [&str; 2] = ["cpu", "directml"];
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CaptionJob {
+    program: String,
+    model: String,
+    /// `cpu` when the catalog does not name it (as before the field was there).
+    #[serde(default)]
+    backend: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

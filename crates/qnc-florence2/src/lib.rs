@@ -26,6 +26,8 @@ const END: i64 = 2;
 const LONGEST: usize = 100;
 /// The detailed caption task as the model's processor words it.
 const TASK: &str = "Describe in detail what is shown in the image.";
+/// The text encoder on the graphics card too, with DirectML.
+const ENCODER_ON_CARD: bool = true;
 const KINDS: [&str; 4] = ["decoder.key", "decoder.value", "encoder.key", "encoder.value"];
 
 /// A loaded model, kept for the next picture.
@@ -40,18 +42,30 @@ pub struct Florence {
 
 impl Florence {
     /// Loads the model of `folder` (its `onnx` files and `tokenizer.json`) with the ONNX Runtime
-    /// library `runtime`, on `threads` threads.
-    pub fn load(folder: &Path, runtime: &Path, threads: usize) -> Result<Self, String> {
+    /// library `runtime`, on `threads` threads, or on the graphics card through DirectML when
+    /// `directml` (user 2026-11-17; the runtime must then be ONNX Runtime's DirectML build). A card
+    /// DirectML cannot use is an error: nothing falls back to the processor.
+    pub fn load(folder: &Path, runtime: &Path, threads: usize, directml: bool) -> Result<Self, String> {
         ort::init_from(runtime.to_string_lossy()).commit().map_err(err)?;
-        let open = |name: &str| -> Result<Session, String> {
-            Session::builder()
-                .and_then(|builder| builder.with_intra_threads(threads))
+        let open = |name: &str, card: bool| -> Result<Session, String> {
+            let builder = Session::builder().and_then(|builder| builder.with_intra_threads(threads));
+            let builder = if directml && card {
+                // DirectML takes no parallel run and no memory pattern (ONNX Runtime's rule).
+                builder.and_then(|builder| builder.with_parallel_execution(false)).and_then(|builder| builder.with_memory_pattern(false)).and_then(|builder| {
+                    builder.with_execution_providers([ort::execution_providers::DirectMLExecutionProvider::default().build().error_on_failure()])
+                })
+            } else {
+                builder
+            };
+            builder
                 .and_then(|builder| builder.commit_from_file(folder.join("onnx").join(format!("{name}.onnx"))))
                 .map_err(|error| format!("{name}: {error}"))
         };
         let tokenizer = tokenizers::Tokenizer::from_file(folder.join("tokenizer.json")).map_err(err)?;
         let task = tokenizer.encode(TASK, true).map_err(err)?.get_ids().iter().map(|&id| i64::from(id)).collect();
-        Ok(Self { vision: open("vision_encoder")?, embed: open("embed_tokens")?, encoder: open("encoder_model")?, decoder: open("decoder_model_merged")?, tokenizer, task })
+        // The decoder with its cache stays on the processor: on DirectML it wrote nonsense (live
+        // 2026-11-17, Iris Xe); the vision encoder carries the heavy work.
+        Ok(Self { vision: open("vision_encoder", true)?, embed: open("embed_tokens", false)?, encoder: open("encoder_model", ENCODER_ON_CARD)?, decoder: open("decoder_model_merged", false)?, tokenizer, task })
     }
 
     /// A few sentences of what `picture` shows (English).
