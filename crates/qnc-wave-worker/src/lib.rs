@@ -542,7 +542,7 @@ fn build_timeline_wave(
     request: &WaveRequest,
     context: &WaveContext,
     readers: &Readers,
-    coarse_made: bool,
+    _coarse_made: bool,
     cancel: &AtomicBool,
 ) -> Result<GeneratedWave, String> {
     if cancel.load(Ordering::Acquire) {
@@ -558,9 +558,9 @@ fn build_timeline_wave(
             coarse: false,
         });
     }
-    // A clip without any wave gets the coarse one first (user 2026-10-18: every clip's
-    // approximate sound quickly, the complete one later).
-    let coarse_first = stored.is_none() && !coarse_made;
+    // No coarse wave first any more (user 2026-11-17: "nije više potreban grubi val, mala je
+    // razlika"): every clip gets the wave of every frame at once.
+    let coarse_first = false;
     let clip = context
         .content_reader
         .read_clip(&request.clip_id)?
