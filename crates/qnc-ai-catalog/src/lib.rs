@@ -266,6 +266,10 @@ struct Engine {
     #[serde(default)]
     vad_model: Option<String>,
     threads: u32,
+    /// How many clips the engine hears at the same time, each in a program of its own (user
+    /// 2026-11-17: "AI prijepis mora biti najbrži"); absent: one at a time.
+    #[serde(default)]
+    parallel: Option<u32>,
 }
 
 /// The engine that transcribes speech on this host.
@@ -279,6 +283,8 @@ pub struct Transcriber {
     pub model: PathBuf,
     pub vad_model: Option<PathBuf>,
     pub threads: u32,
+    /// How many clips are heard at the same time, each in a program of its own (at least 1).
+    pub parallel: u32,
 }
 
 /// The catalog of this host (`QNC_AI_CATALOG`, else beside the program) and its folder.
@@ -349,6 +355,9 @@ fn engine_in(file: &File, folder: &Path, selected: &str) -> Result<Transcriber, 
     if !BACKENDS.contains(&engine.backend.as_str()) {
         return Err(format!("transcription engine {}: unknown backend {}", engine.id, engine.backend));
     }
+    if engine.parallel == Some(0) {
+        return Err(format!("transcription engine {}: parallel must be at least 1", engine.id));
+    }
     if engine.threads == 0 {
         return Err(format!("transcription engine {}: threads must be at least 1", engine.id));
     }
@@ -367,6 +376,7 @@ fn engine_in(file: &File, folder: &Path, selected: &str) -> Result<Transcriber, 
         model: present(&engine.model)?,
         vad_model: engine.vad_model.as_deref().map(present).transpose()?,
         threads: engine.threads,
+        parallel: engine.parallel.unwrap_or(1),
     })
 }
 
