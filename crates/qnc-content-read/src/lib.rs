@@ -422,6 +422,8 @@ pub struct ClipOriginal {
     pub clip_id: String,
     pub source_uri: String,
     pub original_uri: String,
+    /// Imported (copied or linked by the settings), not only Selected.
+    pub imported: bool,
 }
 
 /// Every camera clip of the project database `file` with its source and original (QNC URIs), read
@@ -438,12 +440,12 @@ pub fn clip_originals_of_file(file: &std::path::Path) -> Result<Vec<ClipOriginal
     let camera = camera_only(&conn)?;
     let mut statement = conn
         .prepare(&format!(
-            "SELECT clip_id, source_uri, original_uri FROM public_clips
+            "SELECT clip_id, source_uri, original_uri, import_status IN ('imported', 'done') FROM public_clips
              WHERE source_uri IS NOT NULL AND original_uri IS NOT NULL {camera} ORDER BY original_uri"
         ))
         .map_err(|error| error.to_string())?;
     let rows = statement
-        .query_map([], |row| Ok(ClipOriginal { clip_id: row.get(0)?, source_uri: row.get(1)?, original_uri: row.get(2)? }))
+        .query_map([], |row| Ok(ClipOriginal { clip_id: row.get(0)?, source_uri: row.get(1)?, original_uri: row.get(2)?, imported: row.get(3)? }))
         .map_err(|error| error.to_string())?;
     rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|error| error.to_string())
 }
