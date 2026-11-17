@@ -263,6 +263,10 @@ struct Job {
     /// beside Transcribe; it never takes the graphics card from the player).
     #[serde(default)]
     fast: Option<String>,
+    /// More engines that hear the fast pieces at the same time, after the fast one (user
+    /// 2026-11-18: the graphics card and the processor together).
+    #[serde(default)]
+    fast_with: Vec<String>,
     engines: Vec<Engine>,
 }
 
@@ -333,6 +337,24 @@ pub fn installed_transcriber() -> Result<Transcriber, String> {
 /// The transcription engine this host's catalog selects for `quality`.
 pub fn installed_transcriber_for(quality: Quality) -> Result<Transcriber, String> {
     transcriber_for(&installed_path()?, quality)
+}
+
+/// Every engine that hears the fast pieces on this host: the fast one first, then those it is
+/// given with (each must be there; nothing falls back).
+pub fn installed_fast_transcribers() -> Result<Vec<Transcriber>, String> {
+    fast_transcribers(&installed_path()?)
+}
+
+/// The fast engines of the catalog at `path`, the fast one first.
+pub fn fast_transcribers(path: &Path) -> Result<Vec<Transcriber>, String> {
+    let mut engines = vec![transcriber_for(path, Quality::Fast)?];
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let file: File = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    let folder = path.parent().ok_or("the AI catalog has no folder")?;
+    for id in &file.transcribe.fast_with {
+        engines.push(engine_in(&file, folder, id)?);
+    }
+    Ok(engines)
 }
 
 /// The best transcription engine the catalog at `path` selects.
