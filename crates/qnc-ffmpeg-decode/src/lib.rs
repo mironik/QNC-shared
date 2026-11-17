@@ -504,8 +504,8 @@ fn parse_key_packets(text: &str) -> std::result::Result<Vec<f64>, String> {
 }
 
 /// `background`: the pictures of background work (filmstrips, the AI shots); its decoder runs
-/// at the lowest priority, below the transcription the user waits for (user 2026-11-14:
-/// "montaža ne može početi bez prijepisa"), the player and the desktop.
+/// below normal, like the transcription (the conductor of the ingest gives the priority by places;
+/// at idle it starved, 2026-11-17), below the player and the desktop.
 fn run_filmstrip_command(
     executable: &Path,
     args: Vec<OsString>,
@@ -520,8 +520,10 @@ fn run_filmstrip_command(
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        // No window; IDLE_PRIORITY_CLASS for background work.
-        command.creation_flags(0x08000000 | if background { 0x0000_0040 } else { 0 });
+        // No window; BELOW_NORMAL_PRIORITY_CLASS for background work, the class of the ingest's
+        // worker and its transcription (2026-11-17 measure: at IDLE four filmstrip decoders got
+        // 0.2 of a core each, 12-25 s a clip instead of 1.4 s, whatever places the conductor gave).
+        command.creation_flags(0x08000000 | if background { 0x0000_4000 } else { 0 });
     }
     #[cfg(not(windows))]
     let _ = background;
