@@ -360,6 +360,7 @@ impl TimelineWaveService {
                         if let Some(clip_id) = clip_id {
                             if !self.coarse.remove(clip_id) {
                                 self.jobs.mark_ready(clip_id);
+                                qnc_done_count::add(qnc_done_count::WAVES);
                             }
                         }
                     }

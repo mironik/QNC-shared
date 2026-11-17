@@ -53,6 +53,7 @@ impl Store {
                         Data::Filmstrip(None)
                     })
                 }
+                Operation::ReadMade => Ok(Data::Made { filmstrips: Vec::new(), waves: Vec::new() }),
                 _ => Err(qnc_ui_text::text("artifact.project_artifacts_initialised").into()),
             };
         }
@@ -62,7 +63,20 @@ impl Store {
             Operation::PublishWave(artifact) => self.publish_wave(artifact),
             Operation::ReadWave { clip_id } => self.read_wave(clip_id),
             Operation::ForgetClips { clip_ids } => self.forget_clips(clip_ids),
+            Operation::ReadMade => self.read_made(),
         }
+    }
+
+    fn read_made(&self) -> Result<Data> {
+        let ids = |sql: &str| -> Result<Vec<String>> {
+            let mut statement = self.conn.prepare(sql).map_err(err)?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0)).map_err(err)?;
+            rows.collect::<std::result::Result<Vec<_>, _>>().map_err(err)
+        };
+        Ok(Data::Made {
+            filmstrips: ids("SELECT clip_id FROM filmstrip_artifacts WHERE json_extract(frames_json,'$.status')='ready'")?,
+            waves: ids("SELECT clip_id FROM wave_artifacts")?,
+        })
     }
 
     /// The artifacts of clips about to leave the catalog; a clip that is queued or

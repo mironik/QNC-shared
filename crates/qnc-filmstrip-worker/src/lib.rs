@@ -360,6 +360,7 @@ impl TimelineFilmstripService {
                     Ok(_) => {
                         if let Some(clip_id) = clip_id {
                             self.jobs.mark_ready(clip_id);
+                            qnc_done_count::add(qnc_done_count::FILMSTRIPS);
                         }
                         self.db_complete = false;
                     }
@@ -698,6 +699,8 @@ fn filmstrip_from_pictures(
     let output_paths = artifacts.output_paths(&plan)?;
     let temp_dir = filmstrip_scratch_dir(&plan.clip_id);
     let started = Instant::now();
+    // Where the time of a clip goes (live 2026-11-17: 20-33 s a clip under load, 1.3 s alone).
+    let (mut write_ms, mut decode_ms) = (0u128, 0u128);
     let result = (|| {
         fs::create_dir_all(&temp_dir).map_err(|error| format!("filmstrip temp dir: {error}"))?;
         // Frames closer than a group of pictures share a key picture: each picture is
@@ -716,9 +719,11 @@ fn filmstrip_from_pictures(
             fs::write(&input, picture).map_err(|error| format!("filmstrip picture write: {error}"))?;
             inputs.push(input);
         }
+        write_ms = started.elapsed().as_millis();
         extractor
             .decode_pictures_with_cancel(&given.codec, &inputs, [THUMB_WIDTH, THUMB_HEIGHT], &temp_dir, cancel)
             .map_err(|error| if cancel.load(Ordering::Acquire) { filmstrip_paused_for_playback().to_string() } else { error })?;
+        decode_ms = started.elapsed().as_millis() - write_ms;
         prepare_output_dirs(&output_paths)?;
         for (index, target) in output_paths.iter().enumerate() {
             let temp = temp_dir.join(format!("{:03}.jpg", thumbnail_of[index]));
@@ -733,10 +738,11 @@ fn filmstrip_from_pictures(
     result?;
     filmstrip_log(|| {
         format!(
-            "qnc-filmstrip-worker: clip={} source=Original mode=IntraPictures frames={} build_ms={}",
+            "qnc-filmstrip-worker: clip={} source=Original mode=IntraPictures frames={} build_ms={} write_ms={write_ms} decode_ms={decode_ms} copy_ms={}",
             plan.clip_id,
             plan.frames.len(),
-            started.elapsed().as_millis()
+            started.elapsed().as_millis(),
+            started.elapsed().as_millis().saturating_sub(write_ms + decode_ms)
         )
     });
     Ok(plan)

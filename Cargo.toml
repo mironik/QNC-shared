@@ -93,6 +93,7 @@ qnc-florence2 = { path = "crates/qnc-florence2" }
 qnc-focus-walk = { path = "crates/qnc-focus-walk" }
 qnc-form-host = { path = "crates/qnc-form-host" }
 qnc-form-pieces = { path = "crates/qnc-form-pieces" }
+qnc-done-count = { path = "crates/qnc-done-count" }
 qnc-frame-interp = { path = "crates/qnc-frame-interp" }
 qnc-frame-timebase = { path = "crates/qnc-frame-timebase" }
 qnc-gain = { path = "crates/qnc-gain" }

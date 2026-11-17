@@ -4225,6 +4225,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "qnc-done-count"
+version = "0.1.0"
+
+[[package]]
 name = "qnc-edit-cut"
 version = "0.1.0"
 
@@ -4371,6 +4375,7 @@ dependencies = [
  "qnc-decoder-catalog",
  "qnc-dev-diagnostics",
  "qnc-dir-browser",
+ "qnc-done-count",
  "qnc-filmstrip",
  "qnc-frame-timebase",
  "qnc-media-decode",
@@ -6303,6 +6308,7 @@ dependencies = [
  "qnc-decoder-catalog",
  "qnc-dev-diagnostics",
  "qnc-dir-browser",
+ "qnc-done-count",
  "qnc-ffmpeg-decode",
  "qnc-filmstrip",
  "qnc-loudness",

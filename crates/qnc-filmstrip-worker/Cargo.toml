@@ -5,6 +5,7 @@ edition = "2021"
 description = "Background filmstrip JPEG generator for QNC"
 
 [dependencies]
+qnc-done-count = { workspace = true }
 qnc-ui-text = { workspace = true }
 qnc-background-jobs = { workspace = true }
 qnc-dev-diagnostics = { workspace = true }

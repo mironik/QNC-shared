@@ -33,11 +33,14 @@ pub enum Operation {
     /// The artifacts of clips about to leave the catalog (missing on their source):
     /// only of clips not imported; the others keep theirs. Their ids come back.
     ForgetClips { clip_ids: Vec<String> },
+    /// The clips with a ready filmstrip and the clips with a wave: only their ids, for a count
+    /// (reading every record parsed every wave's peaks).
+    ReadMade,
 }
 
 impl Operation {
     pub fn is_write(&self) -> bool {
-        !matches!(self, Self::ReadFilmstrip { .. } | Self::ReadWave { .. })
+        !matches!(self, Self::ReadFilmstrip { .. } | Self::ReadWave { .. } | Self::ReadMade)
     }
 }
 
@@ -47,6 +50,7 @@ pub enum Data {
     Filmstrip(Option<FilmstripArtifactRecord>),
     Wave(Option<WaveArtifactRecord>),
     Forgotten(Vec<String>),
+    Made { filmstrips: Vec<String>, waves: Vec<String> },
     Changed,
 }
 
@@ -97,6 +101,14 @@ impl ArtifactReader {
             clip_id: clip_id.into(),
         })? {
             Data::Wave(record) => Ok(record),
+            _ => Err(wrong()),
+        }
+    }
+
+    /// The clips with a ready filmstrip and the clips with a wave.
+    pub fn read_made(&mut self) -> Result<(Vec<String>, Vec<String>)> {
+        match self.call(&Operation::ReadMade)? {
+            Data::Made { filmstrips, waves } => Ok((filmstrips, waves)),
             _ => Err(wrong()),
         }
     }
