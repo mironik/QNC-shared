@@ -11,7 +11,7 @@ pub const MODULE_ID: &str = "qnc.module.ai-catalog";
 /// The catalog beside the application, below its folder or one of its parents.
 pub const CATALOG: &str = "catalogs/ai/catalog.json";
 /// The backends an engine may name.
-pub const BACKENDS: [&str; 2] = ["vulkan", "cpu"];
+pub const BACKENDS: [&str; 3] = ["vulkan", "cpu", "directml"];
 /// A model the catalog names under this prefix is in the shared AI folder of the computer.
 pub const SHARE_PREFIX: &str = "share:";
 

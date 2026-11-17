@@ -7,6 +7,8 @@
 //! program that cannot run the backend the catalog chose answers an error, nothing falls back.
 
 mod audio;
+mod tokens;
+pub use tokens::{segments, token_words, Token};
 
 pub use audio::{at_speech_level, clip_floor_dbfs, loud_spans, noise_dbfs, quiet_pieces, read_wav, read_wav_bytes, to_whisper_rate, wav_bytes, write_wav, FLOOR_CEILING_DBFS, WHISPER_RATE};
 use qnc_plugin_process::{Plugin, PluginSpec, Ready};
@@ -33,6 +35,8 @@ pub enum Backend {
     Vulkan,
     /// The processor.
     Cpu,
+    /// The graphics card through DirectML, Windows' own (any DirectX 12 card).
+    Directml,
 }
 
 /// What the application asks: transcribe `wav` (16 kHz mono 16-bit PCM) with the engine `engine`
@@ -71,7 +75,11 @@ impl Transcribe {
     /// The job of `request` on this computer: its engine from the AI catalog here.
     pub fn of(request: &TranscribeRequest) -> Result<Self, String> {
         let engine = qnc_ai_catalog::installed_engine(&request.engine)?;
-        let backend = if engine.backend == "vulkan" { Backend::Vulkan } else { Backend::Cpu };
+        let backend = match engine.backend.as_str() {
+            "vulkan" => Backend::Vulkan,
+            "directml" => Backend::Directml,
+            _ => Backend::Cpu,
+        };
         Ok(Self { model: engine.model, vad_model: engine.vad_model, backend, samples: read_wav_bytes(&request.wav.0)?, language: request.language.clone(), threads: engine.threads })
     }
 }

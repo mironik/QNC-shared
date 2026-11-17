@@ -5026,6 +5026,14 @@ name = "qnc-panel-map"
 version = "0.1.0"
 
 [[package]]
+name = "qnc-parakeet-onnx"
+version = "0.1.0"
+dependencies = [
+ "ort",
+ "qnc-transcribe-jobs",
+]
+
+[[package]]
 name = "qnc-part-sound"
 version = "0.1.0"
 dependencies = [

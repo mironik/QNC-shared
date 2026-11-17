@@ -155,6 +155,7 @@ qnc-mxf-sound = { path = "crates/qnc-mxf-sound" }
 qnc-newsroom-sheet-db = { path = "crates/qnc-newsroom-sheet-db" }
 qnc-notice = { path = "crates/qnc-notice" }
 qnc-paint-pace = { path = "crates/qnc-paint-pace" }
+qnc-parakeet-onnx = { path = "crates/qnc-parakeet-onnx" }
 qnc-part-sound = { path = "crates/qnc-part-sound" }
 qnc-pending-marks = { path = "crates/qnc-pending-marks" }
 qnc-pixel-convert = { path = "crates/qnc-pixel-convert" }
