@@ -31,9 +31,11 @@ pub const MODULE_ID: &str = "qnc.module.shot-analysis";
 /// Where a media URI is on this computer; `None` when it is not here.
 pub type LocalMedia<'a> = dyn Fn(&str) -> Option<PathBuf> + 'a;
 
-/// The pictures a shot analysis looks at: their size and at most how many a second.
+/// The pictures a shot analysis looks at: their size and at most how many a second (two: a
+/// camera's long GOP gives about two intra pictures a second; user 2026-11-18 "spusti na 2", an
+/// all-intra original was looked at four times a second for nothing).
 const PICTURE: [u32; 2] = qnc_filmstrip::handed::THUMB_SIZE;
-const MOST_A_SECOND: f64 = 4.0;
+const MOST_A_SECOND: f64 = 2.0;
 /// Pictures decoded in one decoder call.
 const BATCH: usize = 16;
 /// Decoder calls at once at most (user 2026-11-14: the AI shots on several cores; measured on the
