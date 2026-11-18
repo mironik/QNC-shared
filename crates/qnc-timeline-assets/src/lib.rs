@@ -16,6 +16,11 @@ pub trait TimelineArtifactRead: Send + Sync {
     fn read_filmstrip(&self, clip_id: &str) -> Result<Option<FilmstripArtifactRecord>, String>;
     fn read_wave(&self, clip_id: &str) -> Result<Option<WaveArtifactRecord>, String>;
     fn read_image_bytes(&self, artifact_uri: &str) -> Result<Vec<u8>, String>;
+    /// The pictures the AI shots kept of a clip (JPEG, each at the clip frame it shows, in the
+    /// clip's order) and how many frames the clip has; `None` for a clip without them.
+    fn read_placed(&self, _clip_id: &str) -> Result<Option<(u64, Vec<(u64, Vec<u8>)>)>, String> {
+        Ok(None)
+    }
 }
 
 #[derive(Clone)]
@@ -65,7 +70,8 @@ impl SourceTimelineAssets {
                     })
                     .collect()
             });
-            Arc::new(FilmstripBackground { clip_id: strip.clip_id.clone(), frames })
+            let placed = strip.placed.as_ref().map(|placed| qnc_filmstrip::PlacedPictures { from, to, pictures: placed.pictures.clone() });
+            Arc::new(FilmstripBackground { clip_id: strip.clip_id.clone(), frames, placed })
         });
         let part = |peaks: &[f32]| {
             let at = |frame: u64| ((frame as f64 / total * peaks.len() as f64).round() as usize).min(peaks.len());
@@ -284,6 +290,7 @@ fn poster_strip(clip_id: &str, poster: &qnc_image_assets::RgbaImage) -> Arc<Film
         frames: (0..FILMSTRIP_FRAME_COUNT)
             .map(|index| FilmstripFrameAsset { index, seek_sec: 0.0, uri: uri.clone(), image: poster.clone() })
             .collect(),
+        placed: None,
     });
     built.insert(key, strip.clone());
     strip
@@ -308,14 +315,44 @@ fn read_assets(
 ) -> Result<SourceTimelineAssets, String> {
     let filmstrip_record = context.reader.read_filmstrip(clip_id)?;
     let wave_record = context.reader.read_wave(clip_id)?;
+    let mut filmstrip = match filmstrip_record {
+        Some(record) => load_filmstrip_background(context, &record)?,
+        None => None,
+    };
+    // The AI shots' pictures, when the clip has them: the row as dense as the timeline is wide; a
+    // strip that cannot be read leaves the filmstrip as it was.
+    if let Some(placed) = context.reader.read_placed(clip_id).ok().flatten().and_then(|(total, jpegs)| placed_pictures(clip_id, total, &jpegs)) {
+        let strip = filmstrip.get_or_insert_with(|| FilmstripBackground { clip_id: clip_id.to_string(), frames: thirteen_of(&placed), placed: None });
+        strip.placed = Some(placed);
+    }
     Ok(SourceTimelineAssets {
         clip_id: clip_id.to_string(),
-        filmstrip_background: match filmstrip_record {
-            Some(record) => load_filmstrip_background(context, &record)?.map(Arc::new),
-            None => None,
-        },
+        filmstrip_background: filmstrip.map(Arc::new),
         wave: wave_record.and_then(|record| ready_wave(&record)).map(Arc::new),
     })
+}
+
+/// The kept pictures decoded, each at its frame (one that does not decode is left out).
+fn placed_pictures(clip_id: &str, total: u64, jpegs: &[(u64, Vec<u8>)]) -> Option<qnc_filmstrip::PlacedPictures> {
+    let pictures: Vec<(u64, FilmstripFrameAsset)> = jpegs
+        .iter()
+        .filter_map(|(frame, jpeg)| {
+            let image = qnc_image_assets::decode_thumbnail(jpeg).ok()?;
+            Some((*frame, FilmstripFrameAsset { index: 0, seek_sec: 0.0, uri: format!("ai-strip:{clip_id}:{frame}"), image }))
+        })
+        .collect();
+    (!pictures.is_empty() && total > 0).then(|| qnc_filmstrip::PlacedPictures { from: 0, to: total, pictures: Arc::new(pictures) })
+}
+
+/// The filmstrip's 13 places from placed pictures, for a reader of the 13 (the rows of a story).
+fn thirteen_of(placed: &qnc_filmstrip::PlacedPictures) -> Vec<FilmstripFrameAsset> {
+    let width = placed.to.saturating_sub(placed.from) as f64 / FILMSTRIP_FRAME_COUNT as f64;
+    (0..FILMSTRIP_FRAME_COUNT)
+        .filter_map(|index| {
+            let frame = (placed.from as f64 + (index as f64 + 0.5) * width) as u64;
+            placed.nearest(frame).map(|picture| FilmstripFrameAsset { index, ..picture.clone() })
+        })
+        .collect()
 }
 
 /// The stored filmstrip of one clip with its pictures, read through the public reader;
@@ -365,6 +402,7 @@ fn filmstrip_pictures(
     Ok(Some(FilmstripBackground {
         clip_id: record.clip_id.clone(),
         frames,
+        placed: None,
     }))
 }
 
@@ -514,7 +552,7 @@ mod window_tests {
         let peaks: Vec<f32> = (0..100).map(|at| at as f32).collect();
         let assets = SourceTimelineAssets {
             clip_id: "c".into(),
-            filmstrip_background: Some(Arc::new(FilmstripBackground { clip_id: "c".into(), frames: (0..13).map(frame).collect() })),
+            filmstrip_background: Some(Arc::new(FilmstripBackground { clip_id: "c".into(), frames: (0..13).map(frame).collect(), placed: None })),
             wave: Some(Arc::new(WaveformPeaks { clip_id: "c".into(), a1_peaks: peaks.clone(), a2_peaks: peaks, a3_peaks: Vec::new(), a4_peaks: Vec::new(), coarse: false })),
         };
         let window = assets.window(500, 600, 1000);
@@ -524,5 +562,33 @@ mod window_tests {
         assert_eq!(strip.frames.len(), FILMSTRIP_FRAME_COUNT);
         assert_eq!(strip.frames.iter().map(|frame| frame.index).collect::<Vec<_>>(), (0..13).collect::<Vec<_>>());
         assert!(strip.frames.iter().all(|frame| frame.uri == "f6" || frame.uri == "f7"), "the stored pictures of that part of the clip");
+    }
+}
+
+#[cfg(test)]
+mod placed_tests {
+    use super::*;
+
+    fn jpeg() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new(&mut bytes).encode(&[0u8; 16 * 9 * 3], 16, 9, image::ExtendedColorType::Rgb8).unwrap();
+        bytes
+    }
+
+    #[test]
+    fn a_short_clips_few_pictures_fill_every_place_repeated_and_a_window_shares_them() {
+        // A clip of 5 s at 50p: ten pictures, two a second.
+        let jpegs: Vec<(u64, Vec<u8>)> = (0..10).map(|n| (n * 25, jpeg())).collect();
+        let placed = placed_pictures("c", 250, &jpegs).unwrap();
+        let thirteen = thirteen_of(&placed);
+        assert_eq!(thirteen.len(), FILMSTRIP_FRAME_COUNT, "every place has a picture");
+        let distinct: std::collections::BTreeSet<&str> = thirteen.iter().map(|frame| frame.uri.as_str()).collect();
+        assert_eq!(distinct.len(), 10, "every picture shown, three of them twice");
+        assert_eq!(placed.nearest(30).unwrap().uri, "ai-strip:c:25");
+        assert_eq!(placed.nearest(240).unwrap().uri, "ai-strip:c:225");
+        let assets = SourceTimelineAssets { clip_id: "c".into(), filmstrip_background: Some(Arc::new(FilmstripBackground { clip_id: "c".into(), frames: thirteen, placed: Some(placed) })), wave: None };
+        let window = assets.window(100, 150, 250);
+        let shown = window.filmstrip_background.unwrap().placed.clone().unwrap();
+        assert_eq!((shown.from, shown.to, shown.pictures.len()), (100, 150, 10));
     }
 }

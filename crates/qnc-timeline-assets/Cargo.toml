@@ -10,3 +10,6 @@ qnc-filmstrip = { workspace = true }
 qnc-image-assets = { workspace = true }
 qnc-media-records = { workspace = true }
 qnc-wave = { workspace = true }
+
+[dev-dependencies]
+image = { version = "0.25.10", default-features = false, features = ["jpeg"] }

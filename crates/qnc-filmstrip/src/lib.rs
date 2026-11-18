@@ -71,11 +71,38 @@ pub struct FilmstripFrameAsset {
 pub struct FilmstripBackground {
     pub clip_id: String,
     pub frames: Vec<FilmstripFrameAsset>,
+    /// Every picture the AI shots kept, each at the clip's frame it shows (user 2026-11-18: the
+    /// filmstrip from them, as dense as the timeline is wide); `None` for a clip without them.
+    pub placed: Option<PlacedPictures>,
+}
+
+/// Pictures placed by the clip frame they show, and the frames `[from, to)` the row shows (a
+/// window of the clip shares the pictures).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlacedPictures {
+    pub from: u64,
+    pub to: u64,
+    /// In the order of the clip.
+    pub pictures: std::sync::Arc<Vec<(u64, FilmstripFrameAsset)>>,
+}
+
+impl PlacedPictures {
+    /// The picture shown nearest `frame` (a short shot's picture is repeated in the cells around it).
+    pub fn nearest(&self, frame: u64) -> Option<&FilmstripFrameAsset> {
+        let at = self.pictures.partition_point(|(shown, _)| *shown < frame);
+        let after = self.pictures.get(at);
+        let before = at.checked_sub(1).and_then(|at| self.pictures.get(at));
+        match (before, after) {
+            (Some(b), Some(a)) => Some(if frame - b.0 <= a.0 - frame { &b.1 } else { &a.1 }),
+            (Some(one), None) | (None, Some(one)) => Some(&one.1),
+            (None, None) => None,
+        }
+    }
 }
 
 impl FilmstripBackground {
     pub fn is_empty(&self) -> bool {
-        self.frames.is_empty()
+        self.frames.is_empty() && self.placed.as_ref().is_none_or(|placed| placed.pictures.is_empty())
     }
 }
 
@@ -358,6 +385,7 @@ impl LocalFilmstripArtifacts {
         Ok(FilmstripBackground {
             clip_id: plan.clip_id.clone(),
             frames,
+            placed: None,
         })
     }
 }

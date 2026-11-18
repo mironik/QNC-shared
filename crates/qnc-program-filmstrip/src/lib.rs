@@ -227,7 +227,7 @@ mod tests {
                 image: qnc_image_assets::RgbaImage { size: [1, 1], pixels: vec![0; 4], content_key: index as u64 },
             })
             .collect();
-        ClipStrip { strip: Arc::new(FilmstripBackground { clip_id: "c".into(), frames }), duration_frames: 130 }
+        ClipStrip { strip: Arc::new(FilmstripBackground { clip_id: "c".into(), frames, placed: None }), duration_frames: 130 }
     }
 
     #[test]

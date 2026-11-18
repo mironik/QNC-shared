@@ -1538,7 +1538,14 @@ fn paint_video_row(ui: &mut egui::Ui, row: Rect, input: &TimelineInput<'_>) -> T
 }
 
 fn paint_filmstrip_background(ui: &mut egui::Ui, track: Rect, background: &FilmstripBackground) {
-    if background.frames.is_empty() || track.width() <= 1.0 || track.height() <= 1.0 {
+    if track.width() <= 1.0 || track.height() <= 1.0 {
+        return;
+    }
+    if let Some(placed) = background.placed.as_ref().filter(|placed| !placed.pictures.is_empty() && placed.to > placed.from) {
+        paint_placed_pictures(ui, track, placed);
+        return;
+    }
+    if background.frames.is_empty() {
         return;
     }
     let slot_count = filmstrip_slot_count(background);
@@ -1558,6 +1565,23 @@ fn paint_filmstrip_background(ui: &mut egui::Ui, track: Rect, background: &Films
             frame.image.size,
             &frame.image.pixels,
         );
+    }
+}
+
+/// The AI shots' pictures across the row (user 2026-11-18): cells of the pictures' own shape, as
+/// many as the row is wide, each the picture shown nearest the frame at its middle; a short clip or
+/// a short shot repeats its picture in the cells it spans, none is left empty.
+fn paint_placed_pictures(ui: &mut egui::Ui, track: Rect, placed: &qnc_filmstrip::PlacedPictures) {
+    let [width, height] = placed.pictures[0].1.image.size;
+    let cell = (track.height() * width as f32 / height.max(1) as f32).max(8.0);
+    let cells = (track.width() / cell).ceil().max(1.0) as usize;
+    let frames = (placed.to - placed.from) as f64;
+    for at in 0..cells {
+        let left = track.left() + at as f32 * cell;
+        let rect = Rect::from_min_max(egui::pos2(left, track.top()), egui::pos2((left + cell).min(track.right()), track.bottom()));
+        let middle = ((rect.center().x - track.left()) / track.width()) as f64;
+        let Some(picture) = placed.nearest(placed.from + (middle * frames) as u64) else { continue };
+        let _ = qnc_ui_kit::paint_rgba_image_filled(ui, rect, &picture.uri, picture.image.content_key, picture.image.size, &picture.image.pixels);
     }
 }
 
