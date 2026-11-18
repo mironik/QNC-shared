@@ -12,6 +12,8 @@ pub(crate) struct Store {
     queue_ready: bool,
     queue_took: bool,
     quotes_ready: bool,
+    /// The transcripts say whether they are fine (a project read only, made before, does not).
+    fine_ready: bool,
 }
 
 impl Store {
@@ -30,11 +32,15 @@ impl Store {
             && conn
                 .query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('public_transcript_queue') WHERE name = 'took_ms')", [], |r| r.get(0))
                 .map_err(err)?;
+        let fine_ready = schema_ready
+            && conn
+                .query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('public_clip_transcripts') WHERE name = 'fine')", [], |r| r.get(0))
+                .map_err(err)?;
         if access == Access::ReadOnly {
             conn.pragma_update(None, "query_only", true).map_err(err)?;
         }
         qnc_db_broker::write_only_own_tables(&conn, access, &OWNED);
-        Ok(Self { conn, schema_ready, queue_ready, queue_took, quotes_ready })
+        Ok(Self { conn, schema_ready, queue_ready, queue_took, quotes_ready, fine_ready })
     }
 
     pub(crate) fn execute(&mut self, operation: &Operation) -> Result<Data> {
@@ -194,14 +200,43 @@ impl Store {
         if transcript.from_frame >= transcript.to_frame || !lines_fit || transcript.language.is_empty() {
             return Err(qnc_ui_text::text("db.transcript_invalid").into());
         }
-        let lines = serde_json::to_string(&transcript.lines).map_err(err)?;
-        let text = transcript.lines.iter().map(|line| line.text.as_str()).collect::<Vec<_>>().join(" ");
         let tx = qnc_db_broker::begin_write(&mut self.conn).map_err(err)?;
+        // Every transcript of the clip that overlaps the new one: (from, to, lines, fine).
+        let overlapping: Vec<(i64, i64, String, bool)> = {
+            let mut statement = tx
+                .prepare(
+                    "SELECT from_frame, to_frame, lines_json, fine FROM clip_transcripts
+                     WHERE clip_id = ?1 AND from_frame < ?3 AND to_frame > ?2",
+                )
+                .map_err(err)?;
+            let rows = statement
+                .query_map(params![transcript.clip_id, transcript.from_frame as i64, transcript.to_frame as i64], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get::<_, i64>(3)? != 0)))
+                .map_err(err)?;
+            rows.collect::<std::result::Result<_, _>>().map_err(err)?
+        };
+        let same = |from: i64, to: i64| (u64::try_from(from).unwrap_or(0), u64::try_from(to).unwrap_or(0)) == (transcript.from_frame, transcript.to_frame);
+        // A fast transcript never says over a fine one (user 2026-11-18: the transcript heard while
+        // the clip played is not overwritten by the later one): it keeps only its words outside the
+        // fine ones; one of the very range of a fine one is not kept at all.
+        let mut new_lines = transcript.lines.clone();
+        if !transcript.fine {
+            for (from, to, _, fine) in &overlapping {
+                if *fine {
+                    if same(*from, *to) {
+                        tx.commit().map_err(err)?;
+                        return Ok(Data::Changed);
+                    }
+                    new_lines = crate::lines_cut(&new_lines, u64::try_from(*from).unwrap_or(0), u64::try_from(*to).unwrap_or(0), false);
+                }
+            }
+        }
+        let lines = serde_json::to_string(&new_lines).map_err(err)?;
+        let text = new_lines.iter().map(|line| line.text.as_str()).collect::<Vec<_>>().join(" ");
         tx.execute(
-            "INSERT INTO clip_transcripts (clip_id, from_frame, to_frame, language, engine, text, lines_json, made_at_utc)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            "INSERT INTO clip_transcripts (clip_id, from_frame, to_frame, language, engine, text, lines_json, made_at_utc, fine)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, strftime('%Y-%m-%dT%H:%M:%fZ','now'), ?8)
              ON CONFLICT(clip_id, from_frame, to_frame) DO UPDATE SET language=excluded.language, engine=excluded.engine,
-               text=excluded.text, lines_json=excluded.lines_json, made_at_utc=excluded.made_at_utc",
+               text=excluded.text, lines_json=excluded.lines_json, made_at_utc=excluded.made_at_utc, fine=excluded.fine",
             params![
                 transcript.clip_id,
                 transcript.from_frame as i64,
@@ -209,26 +244,18 @@ impl Store {
                 transcript.language,
                 transcript.engine,
                 text,
-                lines
+                lines,
+                i64::from(transcript.fine)
             ],
         )
         .map_err(err)?;
         // The newest transcript is what was said over its range (user 2026-10-26: "some text
         // repeats"): an older one of the clip loses its lines there, and goes when its range is
-        // inside the new one.
-        let older: Vec<(i64, i64, String)> = {
-            let mut statement = tx
-                .prepare(
-                    "SELECT from_frame, to_frame, lines_json FROM clip_transcripts
-                     WHERE clip_id = ?1 AND from_frame < ?3 AND to_frame > ?2 AND NOT (from_frame = ?2 AND to_frame = ?3)",
-                )
-                .map_err(err)?;
-            let rows = statement
-                .query_map(params![transcript.clip_id, transcript.from_frame as i64, transcript.to_frame as i64], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
-                .map_err(err)?;
-            rows.collect::<std::result::Result<_, _>>().map_err(err)?
-        };
-        for (from, to, lines_json) in older {
+        // inside the new one; a fine one only by another fine one.
+        for (from, to, lines_json, fine) in overlapping {
+            if same(from, to) || (fine && !transcript.fine) {
+                continue;
+            }
             if transcript.from_frame <= u64::try_from(from).unwrap_or(0) && u64::try_from(to).unwrap_or(0) <= transcript.to_frame {
                 tx.execute("DELETE FROM clip_transcripts WHERE clip_id = ?1 AND from_frame = ?2 AND to_frame = ?3", params![transcript.clip_id, from, to])
                     .map_err(err)?;
@@ -296,27 +323,29 @@ impl Store {
 
     fn read_clip(&mut self, clip_id: &str) -> Result<Data> {
         valid_clip(clip_id)?;
+        let fine = if self.fine_ready { "fine" } else { "0" };
         let mut statement = self
             .conn
-            .prepare(
-                "SELECT clip_id, from_frame, to_frame, language, engine, lines_json FROM public_clip_transcripts
-                 WHERE clip_id = ?1 ORDER BY from_frame, to_frame",
-            )
+            .prepare(&format!(
+                "SELECT clip_id, from_frame, to_frame, language, engine, lines_json, {fine} FROM public_clip_transcripts
+                 WHERE clip_id = ?1 ORDER BY from_frame, to_frame"
+            ))
             .map_err(err)?;
         let rows = statement
             .query_map(params![clip_id], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?, row.get(3)?, row.get(4)?, row.get::<_, String>(5)?))
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?, row.get(3)?, row.get(4)?, row.get::<_, String>(5)?, row.get::<_, i64>(6)? != 0))
             })
             .map_err(err)?;
         let mut transcripts = Vec::new();
         for row in rows {
-            let (clip_id, from, to, language, engine, lines) = row.map_err(err)?;
+            let (clip_id, from, to, language, engine, lines, fine) = row.map_err(err)?;
             let lines = serde_json::from_str(&lines).map_err(err)?;
-            transcripts.push(ClipTranscript { clip_id, from_frame: u64::try_from(from).unwrap_or(0), to_frame: u64::try_from(to).unwrap_or(0), language, engine, lines });
+            transcripts.push(ClipTranscript { clip_id, from_frame: u64::try_from(from).unwrap_or(0), to_frame: u64::try_from(to).unwrap_or(0), language, engine, lines, fine });
         }
         // The same rule as a save (user 2026-11-08: words still twice in a statement): what an
         // older transcript says over a newer one's range is not read, word by word
-        // (`lines_cut`). Rows kept before that rule are read right without being written again.
+        // (`lines_cut`); a fine one counts as newer than any that is not (user 2026-11-18). Rows
+        // kept before that rule are read right without being written again.
         let newer = self.made_order(clip_id)?;
         let made = |t: &ClipTranscript| newer.iter().position(|(from, to)| (*from, *to) == (t.from_frame, t.to_frame)).unwrap_or(0);
         let ranges: Vec<(usize, u64, u64)> = transcripts.iter().map(|t| (made(t), t.from_frame, t.to_frame)).collect();
@@ -331,11 +360,13 @@ impl Store {
         Ok(Data::Transcripts(transcripts))
     }
 
-    /// The ranges of a clip's transcripts from the oldest made to the newest.
+    /// The ranges of a clip's transcripts from the oldest made to the newest, the fine ones after
+    /// all the others.
     fn made_order(&self, clip_id: &str) -> Result<Vec<(u64, u64)>> {
+        let fine = if self.fine_ready { "fine, " } else { "" };
         let mut statement = self
             .conn
-            .prepare("SELECT from_frame, to_frame FROM public_clip_transcripts WHERE clip_id = ?1 ORDER BY made_at_utc, from_frame, to_frame")
+            .prepare(&format!("SELECT from_frame, to_frame FROM public_clip_transcripts WHERE clip_id = ?1 ORDER BY {fine}made_at_utc, from_frame, to_frame"))
             .map_err(err)?;
         let rows = statement.query_map(params![clip_id], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))).map_err(err)?;
         rows.map(|row| row.map(|(from, to)| (u64::try_from(from).unwrap_or(0), u64::try_from(to).unwrap_or(0))).map_err(err)).collect()
@@ -435,15 +466,22 @@ fn ensure_schema(conn: &Connection) -> Result<()> {
                 text TEXT NOT NULL,
                 lines_json TEXT NOT NULL,
                 made_at_utc TEXT NOT NULL,
+                fine INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (clip_id, from_frame, to_frame)
             );",
         )
         .map_err(err)?;
     }
+    // Whether a transcript is fine (user 2026-11-18): a column added to a table made before, its
+    // transcripts kept (not fine).
+    let fine: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('clip_transcripts') WHERE name = 'fine')", [], |r| r.get(0)).map_err(err)?;
+    if !fine {
+        conn.execute_batch("ALTER TABLE clip_transcripts ADD COLUMN fine INTEGER NOT NULL DEFAULT 0; DROP VIEW IF EXISTS public_clip_transcripts;").map_err(err)?;
+    }
     if !object_exists(conn, "view", "public_clip_transcripts")? {
         conn.execute_batch(
             "CREATE VIEW public_clip_transcripts AS
-             SELECT clip_id, from_frame, to_frame, language, engine, text, lines_json, made_at_utc
+             SELECT clip_id, from_frame, to_frame, language, engine, text, lines_json, made_at_utc, fine
              FROM clip_transcripts;",
         )
         .map_err(err)?;

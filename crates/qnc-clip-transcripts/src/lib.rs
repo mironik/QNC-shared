@@ -192,7 +192,7 @@ mod tests {
     use super::*;
 
     fn transcript(text: &str) -> ClipTranscript {
-        ClipTranscript { clip_id: "a".into(), from_frame: 0, to_frame: 10, language: "hr".into(), engine: "test".into(), lines: vec![qnc_transcript_db::Line { from: 0, to: 10, text: text.into(), words: Vec::new() }] }
+        ClipTranscript { clip_id: "a".into(), from_frame: 0, to_frame: 10, language: "hr".into(), engine: "test".into(), lines: vec![qnc_transcript_db::Line { from: 0, to: 10, text: text.into(), words: Vec::new() }], fine: false }
     }
 
     #[test]

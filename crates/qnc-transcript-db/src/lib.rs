@@ -99,6 +99,11 @@ pub struct ClipTranscript {
     /// The engine and model that heard it.
     pub engine: String,
     pub lines: Vec<Line>,
+    /// Heard by the fine engine of the language (wav2vec2 for Croatian, while the clip plays or
+    /// asked again; user 2026-11-18): a later transcript of the fast engine never says over it,
+    /// it only fills what the fine one lacks.
+    #[serde(default)]
+    pub fine: bool,
 }
 
 /// Which engine a queued range is transcribed with (user 2026-10-26: Fast or Quality).

@@ -26,6 +26,7 @@ fn transcript(from: u64, to: u64, said: &str) -> ClipTranscript {
         language: "hr".into(),
         engine: "qnc.transcribe.whisper@0.1.0 ggml-large-v3-turbo.bin".into(),
         lines: vec![Line { from, to: from + 10, text: said.into(), words: vec![word] }],
+        fine: false,
     }
 }
 
@@ -225,4 +226,23 @@ fn the_fine_pass_hears_what_only_the_rough_one_heard() {
         span("c", 0, 30, "parakeet m"),
     ];
     assert_eq!(crate::not_heard_by(&spans, "parlaspeech", 25), vec![("a".into(), 0, 200), ("a".into(), 600, 1000), ("c".into(), 0, 30)]);
+}
+
+#[test]
+fn a_fast_transcript_made_later_never_says_over_a_fine_one() {
+    let (_dir, target) = project();
+    // Heard while the clip played, by the fine engine: frames 100..200.
+    save(&target, ClipTranscript { fine: true, ..transcript(100, 200, "fino") }).unwrap();
+    // The fast engine later hears the whole clip; it says other words over the same frames.
+    let mut whole = transcript(0, 300, "brzo");
+    whole.lines.push(Line { from: 150, to: 160, text: "krivo".into(), words: vec![Word { from: 150, to: 160, text: "krivo".into() }] });
+    save(&target, whole).unwrap();
+    let said: Vec<String> = read_clip(&target, "c1").unwrap().iter().flat_map(|t| t.lines.iter().map(|l| l.text.clone())).collect();
+    assert!(said.contains(&"fino".to_string()), "{said:?}");
+    assert!(said.contains(&"brzo".to_string()), "the fast one fills what the fine one lacks: {said:?}");
+    assert!(!said.contains(&"krivo".to_string()), "nothing of the fast one over the fine one: {said:?}");
+    // The same range heard fast again keeps the fine one.
+    save(&target, transcript(100, 200, "opet brzo")).unwrap();
+    let said: Vec<String> = read_clip(&target, "c1").unwrap().iter().flat_map(|t| t.lines.iter().map(|l| l.text.clone())).collect();
+    assert!(said.contains(&"fino".to_string()) && !said.contains(&"opet brzo".to_string()), "{said:?}");
 }
