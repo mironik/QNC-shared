@@ -34,6 +34,23 @@ pub struct Parakeet {
     /// The text of each token id; a word begins with a space.
     vocab: Vec<String>,
     blank: usize,
+    /// The encoder is on the card: it is given only the fixed lengths of [`BUCKETS`].
+    fixed: bool,
+}
+
+/// The lengths (feature frames, 100 a second) the encoder on the card is given: every 5 s up to
+/// 31 s (a window is at most 30 s). The card's time follows the length given, not the speech in it
+/// (measured on Iris Xe: 1 s for 10 s, 2 s for 20 s, 3 s for 31 s), so a short piece is laid in a
+/// short length.
+const BUCKETS: [usize; 6] = [500, 1000, 1500, 2000, 2500, 3100];
+
+/// `features` ([128, frames]) laid in [128, `bucket`], the rest zeros.
+fn padded(features: &[f32], frames: usize, bucket: usize) -> Vec<f32> {
+    let mut laid = vec![0.0f32; 128 * bucket];
+    for channel in 0..128 {
+        laid[channel * bucket..channel * bucket + frames].copy_from_slice(&features[channel * frames..(channel + 1) * frames]);
+    }
+    laid
 }
 
 impl Parakeet {
@@ -56,7 +73,32 @@ impl Parakeet {
         };
         let vocab = read_vocab(&folder.join("vocab.txt"))?;
         let blank = vocab.iter().position(|token| token == "<blk>").ok_or("vocab.txt has no <blk>")?;
-        Ok(Self { last_ms: (0, 0, 0), features: open("nemo128.onnx", false)?, encoder: open("encoder-model.onnx", directml)?, decoder: open("decoder_joint-model.onnx", false)?, vocab, blank })
+        let mut parakeet = Self { last_ms: (0, 0, 0), features: open("nemo128.onnx", false)?, encoder: open("encoder-model.onnx", directml)?, decoder: open("decoder_joint-model.onnx", false)?, vocab, blank, fixed: directml };
+        if directml {
+            // Each length the card is given once, now (audit 2026-11-18: DirectML prepares its work
+            // anew for every new length; the ingest's pieces were all of other lengths, so the card
+            // prepared more than it heard, 1.3x real time instead of 11x).
+            for frames in BUCKETS {
+                parakeet.encode(vec![0.0; 128 * frames], frames, frames as i64)?;
+            }
+        }
+        Ok(parakeet)
+    }
+
+    /// The encoder's frames of `features` ([1, 128, frames], `length` of them real), one vector a
+    /// frame, and how many are real.
+    fn encode(&mut self, features: Vec<f32>, frames: usize, length: i64) -> Result<(Vec<Vec<f32>>, usize), String> {
+        let out = self
+            .encoder
+            .run(ort::inputs![
+                "audio_signal" => Tensor::from_array(([1usize, 128, frames], features)).map_err(err)?,
+                "length" => Tensor::from_array(([1usize], vec![length])).map_err(err)?
+            ])
+            .map_err(err)?;
+        let (shape, data) = out["outputs"].try_extract_tensor::<f32>().map_err(err)?;
+        let width = usize::try_from(shape[2]).map_err(err)?;
+        let real = usize::try_from(out["encoded_lengths"].try_extract_tensor::<i64>().map_err(err)?.1[0]).map_err(err)?;
+        Ok((transposed(data, width), real.min(width)))
     }
 
     /// The tokens of `samples` (16 kHz mono, -1..1), their times in seconds from its start.
@@ -79,18 +121,11 @@ impl Parakeet {
             ((data.to_vec(), length), frames)
         };
         let featured = started.elapsed().as_millis();
-        let (encoded, steps) = {
-            let out = self
-                .encoder
-                .run(ort::inputs![
-                    "audio_signal" => Tensor::from_array(([1usize, 128, frames], features.0)).map_err(err)?,
-                    "length" => Tensor::from_array(([1usize], vec![features.1])).map_err(err)?
-                ])
-                .map_err(err)?;
-            let (shape, data) = out["outputs"].try_extract_tensor::<f32>().map_err(err)?;
-            let width = usize::try_from(shape[2]).map_err(err)?;
-            let length = usize::try_from(out["encoded_lengths"].try_extract_tensor::<i64>().map_err(err)?.1[0]).map_err(err)?;
-            (transposed(data, width), length.min(width))
+        // On the card the features are laid in the smallest of a few fixed lengths (the rest zeros,
+        // the real length given), so DirectML never prepares a new length.
+        let (encoded, steps) = match self.fixed.then(|| BUCKETS.into_iter().find(|&bucket| bucket >= frames)).flatten() {
+            Some(bucket) => self.encode(padded(&features.0, frames, bucket), bucket, features.1)?,
+            None => self.encode(features.0, frames, features.1)?,
         };
         let encoded_at = started.elapsed().as_millis();
         let tokens = self.greedy(&encoded, steps)?;
