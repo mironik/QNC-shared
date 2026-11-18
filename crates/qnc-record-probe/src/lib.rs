@@ -201,9 +201,12 @@ fn probe_once(
         }
         Err(error) => {
             let code = format!("{error:?}");
+            // ffprobe ending with an error (exit code) is retried as one interrupted: under a full
+            // card copy it failed on two good clips that never got a record, a wave or a transcript
+            // (user 2026-11-18). A bad file is not looped: the worker tries a record once a run.
             let interrupted = matches!(
                 error,
-                qnc_media_probe::Error::Timeout | qnc_media_probe::Error::Spawn
+                qnc_media_probe::Error::Timeout | qnc_media_probe::Error::Spawn | qnc_media_probe::Error::Failed
             );
             let outcome = if interrupted {
                 AcquisitionOutcome::Interrupted { code: code.clone() }
