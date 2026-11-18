@@ -1,6 +1,6 @@
 //! Shot analysis of one MXF original, printed (the file is only read; nothing is written but
 //! the decoder's small pictures in the system temp folder, removed after). With a folder, the 13
-//! filmstrip thumbnails made in the same pass are written there.
+//! filmstrip thumbnails made in the same pass and the strip of every picture are written there.
 //! `cargo run --release -p qnc-shot-analysis --example analyse_file -- <file.mxf> [h264|mpeg2video] [folder]`
 
 use std::sync::atomic::AtomicBool;
@@ -23,6 +23,9 @@ fn main() {
         for (i, jpeg) in jpegs.iter().enumerate() {
             std::fs::write(folder.join(format!("{i:02}.jpg")), jpeg).unwrap();
         }
+        let strip = qnc_shot_analysis::write_strip(&folder, "qnc://local/example", "example", &found.decoded).expect("strip");
+        let bytes: u64 = strip.pictures.iter().map(|p| u64::from(p.len)).sum();
+        println!("strip pictures={} bytes={bytes}", strip.pictures.len());
     }
     for shot in found.shots {
         println!("shot {:>6} - {:>6}  key={:>6}  bright={:>5.1} sharp={:>8.1} motion={:.3}  {:?}", shot.from, shot.to, shot.key_frame, shot.brightness, shot.sharpness, shot.motion, shot.looks);

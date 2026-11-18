@@ -29,7 +29,7 @@ fn main() -> Result<(), String> {
     let texts = client.texts(&qnc_shot_content::TextsRequest::new(&engine.model, labels.prompts()))?;
     println!("agent ready and {} labels: {} ms", labels.labels.len(), started.elapsed().as_millis());
     let started = Instant::now();
-    let shots = qnc_shot_db::ClipShots { clip_id: "look-card".into(), media_uri: String::new(), pictures: found.pictures, shots: found.shots.clone(), parts: found.parts.clone(), error: String::new(), took_ms: 0 };
+    let shots = qnc_shot_db::ClipShots { clip_id: "look-card".into(), media_uri: String::new(), pictures: found.pictures, shots: found.shots.clone(), parts: found.parts.clone(), error: String::new(), took_ms: 0, strip: None };
     let units = qnc_shot_content_run::units(&shots);
     let parts = qnc_shot_content_run::look_file("look-card", codec, path, &units, count, &engine.model, &client, &pace, None)?;
     let pictures: usize = parts.iter().map(|part| part.frames.len()).sum();

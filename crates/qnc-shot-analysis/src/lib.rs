@@ -20,7 +20,7 @@ use std::{
 
 use qnc_content_store::{Access, ContentTarget};
 use qnc_db_broker::{ProjectDbTarget, WriteLease};
-use qnc_shot_db::{ClipShots, PartRecord, ShotRecord};
+use qnc_shot_db::{ClipShots, PartRecord, PictureStrip, ShotRecord, StripPicture};
 use qnc_work_settings::{SettingsReader, WorkSettings};
 
 mod keys;
@@ -101,6 +101,10 @@ pub fn analyse_missing(project: &ShotProject, local_media: &LocalMedia<'_>, leas
     if remaining.is_empty() {
         return Ok(0);
     }
+    // Where every picture the analysis decodes is kept: the folder of the AI shots, a folder a clip
+    // (user 2026-11-18: "koliko bi nas koštalo da sve slike spremamo"); without it the analysis
+    // goes on and keeps none.
+    let strips = strip_folder(reader, settings);
     let content = ContentTarget::for_project(reader, settings)?;
     let mut client = content.open(Access::ReadOnly)?;
     let mut kept = 0;
@@ -122,8 +126,17 @@ pub fn analyse_missing(project: &ShotProject, local_media: &LocalMedia<'_>, leas
             break;
         }
         let record = match found {
-            Ok(found) => ClipShots { clip_id: clip_id.clone(), media_uri: original, pictures: found.pictures, shots: found.shots, parts: found.parts, error: String::new(), took_ms: 0 },
-            Err(error) => ClipShots { clip_id: clip_id.clone(), media_uri: original, pictures: 0, shots: Vec::new(), parts: Vec::new(), error, took_ms: 0 },
+            Ok(found) => {
+                let strip = strips.as_ref().and_then(|(folder, base)| match write_strip(folder, base, &clip_id, &found.decoded) {
+                    Ok(strip) => Some(strip),
+                    Err(error) => {
+                        log(format!("shot-analysis clip={clip_id} strip not kept: {error}"));
+                        None
+                    }
+                });
+                ClipShots { clip_id: clip_id.clone(), media_uri: original, pictures: found.pictures, shots: found.shots, parts: found.parts, error: String::new(), took_ms: 0, strip }
+            }
+            Err(error) => ClipShots { clip_id: clip_id.clone(), media_uri: original, pictures: 0, shots: Vec::new(), parts: Vec::new(), error, took_ms: 0, strip: None },
         };
         let record = ClipShots { took_ms: started.elapsed().as_millis() as u64, ..record };
         log(format!(
@@ -175,6 +188,8 @@ pub struct Found {
     /// The filmstrip's thumbnails (JPEG, `qnc_filmstrip::handed::THUMB_SIZE`), one for each place
     /// asked, from the decoded picture nearest it; `None` when none was asked or one is missing.
     pub filmstrip: Option<Vec<Vec<u8>>>,
+    /// Every picture decoded, in the order of the clip: its frame and its JPEG (`PICTURE` size).
+    pub decoded: Vec<(u64, Vec<u8>)>,
 }
 
 /// The shots and usable parts of one MXF or MP4 original at `path` whose pictures are `codec`
@@ -203,6 +218,7 @@ pub fn analyse_file_with(clip_id: &str, codec: &str, path: &Path, pace: &Pace<'_
     // the filmstrip itself takes); its decoded JPEG is kept as it is, the filmstrip's size.
     let nearest: Vec<usize> = if entries.is_empty() { Vec::new() } else { filmstrip.iter().map(|&target| nearest_entry(&entries, target)).collect() };
     let mut kept: std::collections::HashMap<usize, Vec<u8>> = Default::default();
+    let mut every_jpeg: Vec<(u64, Vec<u8>)> = Vec::with_capacity(entries.len());
     let temp = scratch_dir(clip_id);
     let result: Result<Vec<qnc_shot_detect::Picture>, String> = (|| {
         let mut pictures = Vec::with_capacity(entries.len());
@@ -241,10 +257,12 @@ pub fn analyse_file_with(clip_id: &str, codec: &str, path: &Path, pace: &Pace<'_
                     let file = folder.join(format!("{n:03}.jpg"));
                     let Ok(image) = image::open(&file) else { continue };
                     let entry = (g * decoders() + b) * BATCH + n;
-                    if nearest.contains(&entry) {
-                        if let Ok(jpeg) = fs::read(&file) {
-                            kept.insert(entry, jpeg);
+                    // Every picture's JPEG is kept (the clip's strip); the filmstrip's places take theirs.
+                    if let Ok(jpeg) = fs::read(&file) {
+                        if nearest.contains(&entry) {
+                            kept.insert(entry, jpeg.clone());
                         }
+                        every_jpeg.push((shown, jpeg));
                     }
                     let grey = image.into_luma8();
                     pictures.push(qnc_shot_detect::Picture { frame: shown, width: grey.width() as usize, height: grey.height() as usize, luma: grey.into_raw() });
@@ -277,7 +295,7 @@ pub fn analyse_file_with(clip_id: &str, codec: &str, path: &Path, pace: &Pace<'_
         })
         .collect();
     let filmstrip = (!nearest.is_empty()).then(|| nearest.iter().map(|entry| kept.get(entry).cloned()).collect::<Option<Vec<_>>>()).flatten();
-    Ok(Found { pictures: count, shots, parts, filmstrip })
+    Ok(Found { pictures: count, shots, parts, filmstrip, decoded: every_jpeg })
 }
 
 /// The entry whose picture is shown nearest `target`.
@@ -292,4 +310,52 @@ fn scratch_dir(clip_id: &str) -> PathBuf {
 
 fn log(line: String) {
     qnc_dev_diagnostics::log_line(qnc_dev_diagnostics::DiagnosticsStream::Player, line);
+}
+
+/// The folder of the project's AI shots on this computer and its URI; `None` (logged) when the
+/// project has none or is not on this computer.
+fn strip_folder(reader: &SettingsReader, settings: &WorkSettings) -> Option<(PathBuf, String)> {
+    let found = reader
+        .local_workspace_dir(settings)
+        .map_err(|e| e.to_string())
+        .and_then(|dir| dir.ok_or_else(|| qnc_ui_text::text("import.import_needs_local_access_project_folder").to_string()))
+        .and_then(|dir| settings.ai_shots_location(&dir).map_err(|e| e.message));
+    found.map_err(|error| log(format!("shot-analysis strips not kept: {error}"))).ok()
+}
+
+/// The file of the clip's strip in the AI shots folder (its own folder, beside the shots' posters).
+pub const STRIP_FILE: &str = "pictures.jpgs";
+
+/// Writes the JPEGs of one clip one after the other into `<folder>/<clip>/pictures.jpgs` and
+/// says where each one is; a clip analysed again writes its file anew.
+pub fn write_strip(folder: &Path, base_uri: &str, clip_id: &str, jpegs: &[(u64, Vec<u8>)]) -> Result<PictureStrip, String> {
+    let dir = folder.join(clip_id);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let mut bytes = Vec::with_capacity(jpegs.iter().map(|(_, jpeg)| jpeg.len()).sum());
+    let mut pictures = Vec::with_capacity(jpegs.len());
+    for (frame, jpeg) in jpegs {
+        pictures.push(StripPicture { frame: *frame, offset: bytes.len() as u64, len: u32::try_from(jpeg.len()).map_err(|e| e.to_string())? });
+        bytes.extend_from_slice(jpeg);
+    }
+    fs::write(dir.join(STRIP_FILE), &bytes).map_err(|e| e.to_string())?;
+    Ok(PictureStrip { uri: format!("{}/{clip_id}/{STRIP_FILE}", base_uri.trim_end_matches('/')), pictures })
+}
+
+#[cfg(test)]
+mod strip_tests {
+    use super::*;
+
+    #[test]
+    fn every_picture_is_found_again_by_its_place_in_the_strip() {
+        let dir = std::env::temp_dir().join(format!("qnc-strip-test-{}", std::process::id()));
+        let jpegs = vec![(0, vec![1u8, 2, 3]), (25, vec![4, 5]), (50, vec![6, 7, 8, 9])];
+        let strip = write_strip(&dir, "qnc://local/source/project-p/file/products/ai_shots/", "c1", &jpegs).unwrap();
+        assert_eq!(strip.uri, "qnc://local/source/project-p/file/products/ai_shots/c1/pictures.jpgs");
+        let bytes = fs::read(dir.join("c1").join(STRIP_FILE)).unwrap();
+        for (picture, (frame, jpeg)) in strip.pictures.iter().zip(&jpegs) {
+            assert_eq!(picture.frame, *frame);
+            assert_eq!(&bytes[picture.offset as usize..][..picture.len as usize], jpeg.as_slice());
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

@@ -22,7 +22,7 @@ fn shot(from: u64, to: u64, looks: &[&str]) -> ShotRecord {
 }
 
 fn analysis(clip: &str, shots: Vec<ShotRecord>) -> ClipShots {
-    ClipShots { clip_id: clip.into(), media_uri: "qnc://local/source/s/file/c.mxf".into(), pictures: 12, shots, parts: Vec::new(), error: String::new(), took_ms: 900 }
+    ClipShots { clip_id: clip.into(), media_uri: "qnc://local/source/s/file/c.mxf".into(), pictures: 12, shots, parts: Vec::new(), error: String::new(), took_ms: 900, strip: None }
 }
 
 #[test]
@@ -77,6 +77,22 @@ fn the_analysis_is_kept_in_the_ai_file_beside_the_project_not_in_it() {
     save(&target, analysis("c1", vec![shot(0, 300, &[])]), None).unwrap();
     let in_project: i64 = Connection::open(dir.path().join("project.db")).unwrap().query_row("SELECT count(*) FROM sqlite_master WHERE name = 'clip_shots'", [], |row| row.get(0)).unwrap();
     assert_eq!(in_project, 0, "the project database has no AI table");
-    std::fs::remove_file(dir.path().join(qnc_db_broker::AI_FILE)).ok();
+    // The writer's thread lets the file go just after its answer: on Windows it may still hold it.
+    let ai = dir.path().join(qnc_db_broker::AI_FILE);
+    let gone = (0..100).any(|_| std::fs::remove_file(&ai).is_ok() || { std::thread::sleep(std::time::Duration::from_millis(20)); false });
+    assert!(gone, "the AI file is let go");
     assert_eq!(read_clip(&target, "c1").unwrap(), None, "the AI file gone, the project reads as not analysed");
+}
+
+#[test]
+fn the_strip_of_every_picture_is_kept_and_an_analysis_without_it_reads_none() {
+    let (_dir, target) = project();
+    let strip = PictureStrip {
+        uri: "qnc://local/source/project-p1/file/products/ai_shots/c1/pictures.jpgs".into(),
+        pictures: vec![StripPicture { frame: 0, offset: 0, len: 5800 }, StripPicture { frame: 25, offset: 5800, len: 6100 }],
+    };
+    save(&target, ClipShots { strip: Some(strip.clone()), ..analysis("c1", vec![shot(0, 300, &[])]) }, None).unwrap();
+    save(&target, analysis("c2", vec![shot(0, 300, &[])]), None).unwrap();
+    assert_eq!(read_clip(&target, "c1").unwrap().unwrap().strip, Some(strip));
+    assert_eq!(read_clip(&target, "c2").unwrap().unwrap().strip, None);
 }

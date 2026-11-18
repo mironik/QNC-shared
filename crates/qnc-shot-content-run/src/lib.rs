@@ -555,7 +555,7 @@ mod tests {
         assert!(is_statement(&talking, &list, &texts, &[]), "most frames look like a statement, no transcript");
         assert!(!is_statement(&[content(0, 300, vec![0.0, 1.0])], &list, &texts, &[]));
         let shot = qnc_shot_db::ShotRecord { from: 0, to: 340, looks: Vec::new(), key_frame: 10, brightness: 0.5, sharpness: 0.5, motion: 0.0 };
-        let shots = qnc_shot_db::ClipShots { clip_id: "c".into(), media_uri: "qnc://x".into(), pictures: 3, shots: vec![shot], parts: Vec::new(), error: String::new(), took_ms: 0 };
+        let shots = qnc_shot_db::ClipShots { clip_id: "c".into(), media_uri: "qnc://x".into(), pictures: 3, shots: vec![shot], parts: Vec::new(), error: String::new(), took_ms: 0, strip: None };
         let whole = whole_shots(&shots, talking);
         assert_eq!(whole.iter().map(|part| (part.from, part.to, part.kind.as_str())).collect::<Vec<_>>(), [(0, 340, STATEMENT)]);
         assert_eq!(whole[0].frames, [0, 100, 300]);
@@ -589,6 +589,7 @@ mod tests {
             parts: vec![part(20, 200, 80)],
             error: String::new(),
             took_ms: 0,
+            strip: None,
         };
         let units = units(&shots);
         let shown: Vec<(u64, u64, &str)> = units.iter().map(|u| (u.from, u.to, u.camera.as_str())).collect();

@@ -63,6 +63,29 @@ pub struct ClipShots {
     pub error: String,
     /// How long the analysis took (milliseconds).
     pub took_ms: u64,
+    /// Every picture the analysis decoded, kept (user 2026-11-18: "koliko bi nas koštalo da sve
+    /// slike spremamo, onda nam nije ni potreban filmstrip"); `None` for an analysis made before.
+    #[serde(default)]
+    pub strip: Option<PictureStrip>,
+}
+
+/// The pictures of a clip in one file: JPEG after JPEG, each found by its place in the file.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PictureStrip {
+    /// The file (a QNC URI in the project's AI shots folder).
+    pub uri: String,
+    /// The pictures in the order of the clip.
+    pub pictures: Vec<StripPicture>,
+}
+
+/// One picture of a strip: the clip's frame it shows, and where its JPEG is in the file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StripPicture {
+    pub frame: u64,
+    pub offset: u64,
+    pub len: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

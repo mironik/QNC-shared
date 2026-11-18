@@ -9,6 +9,8 @@ const OWNED: [&str; 1] = ["clip_shots"];
 pub(crate) struct Store {
     conn: Connection,
     ready: bool,
+    /// The view has the strip column (a project read only, made before it, has none).
+    strip: bool,
 }
 
 impl Store {
@@ -41,16 +43,31 @@ impl Store {
                     SELECT clip_id, media_uri, pictures, shots_json, parts_json, version, error, took_ms, made_at_utc FROM clip_shots;",
             )
             .map_err(err)?;
+            // The strip of every picture decoded (user 2026-11-18): a column added to a table made
+            // before, its analyses kept (they have no strip).
+            let has_strip: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('clip_shots') WHERE name='strip_json')", [], |r| r.get(0)).map_err(err)?;
+            if !has_strip {
+                tx.execute_batch(
+                    "ALTER TABLE clip_shots ADD COLUMN strip_json TEXT;
+                     DROP VIEW IF EXISTS public_clip_shots;
+                     CREATE VIEW public_clip_shots AS
+                        SELECT clip_id, media_uri, pictures, shots_json, parts_json, version, error, took_ms, made_at_utc, strip_json FROM clip_shots;",
+                )
+                .map_err(err)?;
+            }
             tx.commit().map_err(err)?;
         }
         let ready = conn
             .query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('public_clip_shots') WHERE name='parts_json')", [], |r| r.get(0))
             .map_err(err)?;
+        let strip = conn
+            .query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('public_clip_shots') WHERE name='strip_json')", [], |r| r.get(0))
+            .map_err(err)?;
         if access == Access::ReadOnly {
             conn.pragma_update(None, "query_only", true).map_err(err)?;
         }
         qnc_db_broker::write_only_own_tables(&conn, access, &OWNED);
-        Ok(Self { conn, ready })
+        Ok(Self { conn, ready, strip })
     }
 
     pub(crate) fn execute(&mut self, operation: &Operation) -> Result<Data> {
@@ -78,13 +95,14 @@ impl Store {
         }
         let json = serde_json::to_string(&shots.shots).map_err(err)?;
         let parts = serde_json::to_string(&shots.parts).map_err(err)?;
+        let strip = shots.strip.as_ref().map(serde_json::to_string).transpose().map_err(err)?;
         let tx = qnc_db_broker::begin_write(&mut self.conn).map_err(err)?;
         tx.execute(
-            "INSERT INTO clip_shots (clip_id, media_uri, pictures, shots_json, parts_json, version, error, took_ms, made_at_utc)
-             VALUES (?1, ?2, ?3, ?4, ?7, ?8, ?5, ?6, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            "INSERT INTO clip_shots (clip_id, media_uri, pictures, shots_json, parts_json, version, error, took_ms, made_at_utc, strip_json)
+             VALUES (?1, ?2, ?3, ?4, ?7, ?8, ?5, ?6, strftime('%Y-%m-%dT%H:%M:%fZ','now'), ?9)
              ON CONFLICT(clip_id) DO UPDATE SET media_uri=excluded.media_uri, pictures=excluded.pictures,
-               shots_json=excluded.shots_json, parts_json=excluded.parts_json, version=excluded.version, error=excluded.error, took_ms=excluded.took_ms, made_at_utc=excluded.made_at_utc",
-            params![shots.clip_id, shots.media_uri, shots.pictures, json, shots.error, shots.took_ms as i64, parts, ANALYSIS_VERSION],
+               shots_json=excluded.shots_json, parts_json=excluded.parts_json, version=excluded.version, error=excluded.error, took_ms=excluded.took_ms, made_at_utc=excluded.made_at_utc, strip_json=excluded.strip_json",
+            params![shots.clip_id, shots.media_uri, shots.pictures, json, shots.error, shots.took_ms as i64, parts, ANALYSIS_VERSION, strip],
         )
         .map_err(err)?;
         tx.commit().map_err(err)?;
@@ -92,21 +110,33 @@ impl Store {
     }
 
     fn read_clip(&mut self, clip_id: &str) -> Result<Data> {
+        let strip_column = if self.strip { "strip_json" } else { "NULL" };
         let row = self
             .conn
             .query_row(
-                "SELECT media_uri, pictures, shots_json, error, took_ms, parts_json FROM public_clip_shots WHERE clip_id = ?1 AND version = ?2",
+                &format!("SELECT media_uri, pictures, shots_json, error, took_ms, parts_json, {strip_column} FROM public_clip_shots WHERE clip_id = ?1 AND version = ?2"),
                 params![clip_id, ANALYSIS_VERSION],
-                |r| Ok((r.get::<_, String>(0)?, r.get::<_, u32>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?, r.get::<_, i64>(4)?, r.get::<_, String>(5)?)),
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, u32>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, i64>(4)?,
+                        r.get::<_, String>(5)?,
+                        r.get::<_, Option<String>>(6)?,
+                    ))
+                },
             )
             .optional()
             .map_err(err)?;
-        let Some((media_uri, pictures, json, error, took_ms, parts)) = row else {
+        let Some((media_uri, pictures, json, error, took_ms, parts, strip)) = row else {
             return Ok(Data::Clip(None));
         };
         let shots = serde_json::from_str(&json).map_err(err)?;
         let parts = serde_json::from_str(&parts).map_err(err)?;
-        Ok(Data::Clip(Some(ClipShots { clip_id: clip_id.into(), media_uri, pictures, shots, parts, error, took_ms: took_ms.max(0) as u64 })))
+        let strip = strip.map(|strip| serde_json::from_str(&strip)).transpose().map_err(err)?;
+        Ok(Data::Clip(Some(ClipShots { clip_id: clip_id.into(), media_uri, pictures, shots, parts, error, took_ms: took_ms.max(0) as u64, strip })))
     }
 
     fn read_analysed(&mut self) -> Result<Data> {
