@@ -85,11 +85,25 @@ pub fn complete(
     backend: &dyn ProbeBackend,
     cancel: &AtomicBool,
 ) -> std::result::Result<Snapshot, Error> {
+    complete_media(records, source_record, camera, backend, cancel, true)
+}
+
+/// As `complete`, the proxy probed only when `proxy` (the project reads it): a proxy the camera
+/// recorded and the project neither plays nor copies stays as the card describes it (user
+/// 2026-11-18: probed from the card after the copy, the card ejected, two clips were left without
+/// a record).
+pub fn complete_media(
+    records: &ProjectMediaRecords,
+    source_record: &SourceRecord,
+    camera: Snapshot,
+    backend: &dyn ProbeBackend,
+    cancel: &AtomicBool,
+    proxy: bool,
+) -> std::result::Result<Snapshot, Error> {
     if camera.phase == Phase::Final {
         return Ok(camera);
     }
-    let needed =
-        qnc_media_metadata_compose::required_probes(&camera).map_err(|e| format!("{e:?}"))?;
+    let needed = needed_probes(&camera, proxy)?;
     let mut documents = camera_documents(records, &camera)?;
     let mut reports = Vec::new();
     for (i, media_uri) in needed.into_iter().enumerate() {
@@ -127,6 +141,13 @@ pub fn complete(
     records
         .read(&camera.metadata.clip_id, None)?
         .ok_or_else(|| qnc_ui_text::text("record.final_record_missing").into())
+}
+
+/// The media of `camera` that lack something and are probed: the proxy only when `proxy`.
+pub fn needed_probes(camera: &Snapshot, proxy: bool) -> std::result::Result<Vec<String>, Error> {
+    let needed = qnc_media_metadata_compose::required_probes(camera).map_err(|e| format!("{e:?}"))?;
+    let unused = (!proxy).then(|| camera.metadata.proxy.as_ref().map(|p| p.media_uri.clone())).flatten();
+    Ok(needed.into_iter().filter(|uri| Some(uri) != unused.as_ref()).collect())
 }
 
 /// Whether a final record still lacks something playback reads.

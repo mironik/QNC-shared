@@ -44,6 +44,13 @@ impl Needs {
         Self { playback: Playback::Original, copies_proxy: false }
     }
 
+
+    /// The project reads the proxy at all (plays it when the clip has one, or copies it); else
+    /// its media are not probed (user 2026-11-18: a proxy the camera recorded was probed from
+    /// the card after the copy and the card ejected).
+    pub fn uses_proxy(&self) -> bool {
+        self.copies_proxy || self.playback != Playback::Original
+    }
     fn proxy_required(&self) -> bool {
         self.copies_proxy || self.playback == Playback::Proxy
     }
