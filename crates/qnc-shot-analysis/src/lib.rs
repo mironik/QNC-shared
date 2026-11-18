@@ -32,7 +32,7 @@ pub const MODULE_ID: &str = "qnc.module.shot-analysis";
 pub type LocalMedia<'a> = dyn Fn(&str) -> Option<PathBuf> + 'a;
 
 /// The pictures a shot analysis looks at: their size and at most how many a second.
-const PICTURE: [u32; 2] = [160, 90];
+const PICTURE: [u32; 2] = qnc_filmstrip::handed::THUMB_SIZE;
 const MOST_A_SECOND: f64 = 4.0;
 /// Pictures decoded in one decoder call.
 const BATCH: usize = 16;
@@ -153,7 +153,14 @@ fn wait_for_player(pace: &Pace<'_>) -> bool {
 /// cannot be read this way.
 fn analyse(clip_id: &str, snapshot: &qnc_media_records::Snapshot, path: &Path, pace: &Pace<'_>) -> Result<Found, String> {
     let codec = qnc_filmstrip::original_picture_codec(snapshot).ok_or_else(|| qnc_ui_text::text("shots.codec_not_read").to_string())?;
-    analyse_file(clip_id, codec, path, pace)
+    let targets = qnc_filmstrip::original_picture_frames(snapshot).unwrap_or_default();
+    let found = analyse_file_with(clip_id, codec, path, pace, &targets)?;
+    // The filmstrip's thumbnails from the pictures decoded here, for the filmstrip worker of this
+    // process (user 2026-11-18: AI shots and the filmstrip in one pass).
+    if let Some(jpegs) = found.filmstrip.clone() {
+        qnc_filmstrip::handed::hand(clip_id, jpegs);
+    }
+    Ok(found)
 }
 
 /// What the analysis of one clip found.
@@ -163,11 +170,20 @@ pub struct Found {
     pub pictures: u32,
     pub shots: Vec<ShotRecord>,
     pub parts: Vec<PartRecord>,
+    /// The filmstrip's thumbnails (JPEG, `qnc_filmstrip::handed::THUMB_SIZE`), one for each place
+    /// asked, from the decoded picture nearest it; `None` when none was asked or one is missing.
+    pub filmstrip: Option<Vec<Vec<u8>>>,
 }
 
 /// The shots and usable parts of one MXF or MP4 original at `path` whose pictures are `codec`
 /// (`h264`, `mpeg2video`; an MP4's own index names its codec); the file is only read.
 pub fn analyse_file(clip_id: &str, codec: &str, path: &Path, pace: &Pace<'_>) -> Result<Found, String> {
+    analyse_file_with(clip_id, codec, path, pace, &[])
+}
+
+/// As `analyse_file`, also making the filmstrip's thumbnails for the frames `filmstrip` (its places)
+/// from the pictures it decodes: no picture is decoded twice.
+pub fn analyse_file_with(clip_id: &str, codec: &str, path: &Path, pace: &Pace<'_>, filmstrip: &[u64]) -> Result<Found, String> {
     let mut keys = KeyPictures::open(path)?.ok_or_else(|| qnc_ui_text::text("shots.no_index").to_string())?;
     let codec = keys.codec().unwrap_or(codec);
     let (frames, rate) = (keys.frames, keys.rate);
@@ -181,6 +197,10 @@ pub fn analyse_file(clip_id: &str, codec: &str, path: &Path, pace: &Pace<'_>) ->
         }
     }
     let extractor = qnc_decoder_catalog::installed_filmstrip_extractor().map_err(|e| e.to_string())?.ok_or_else(|| qnc_ui_text::text("shots.no_decoder").to_string())?;
+    // The picture each filmstrip place takes: the one looked at nearest it (an intra picture, as
+    // the filmstrip itself takes); its decoded JPEG is kept as it is, the filmstrip's size.
+    let nearest: Vec<usize> = if entries.is_empty() { Vec::new() } else { filmstrip.iter().map(|&target| nearest_entry(&entries, target)).collect() };
+    let mut kept: std::collections::HashMap<usize, Vec<u8>> = Default::default();
     let temp = scratch_dir(clip_id);
     let result: Result<Vec<qnc_shot_detect::Picture>, String> = (|| {
         let mut pictures = Vec::with_capacity(entries.len());
@@ -188,7 +208,7 @@ pub fn analyse_file(clip_id: &str, codec: &str, path: &Path, pace: &Pace<'_>) ->
         // Several batches at once, each decoded by its own decoder call in a folder of its own;
         // the pictures are read one after the other (the file, one reader), the decoding is what
         // takes the time.
-        for group in batches.chunks(decoders()) {
+        for (g, group) in batches.chunks(decoders()).enumerate() {
             if !wait_for_player(pace) {
                 return Err(qnc_ui_text::text("shots.stopped").into());
             }
@@ -213,10 +233,17 @@ pub fn analyse_file(clip_id: &str, codec: &str, path: &Path, pace: &Pace<'_>) ->
                     .collect();
                 running.into_iter().map(|thread| thread.join().unwrap_or_else(|_| Err("a decoder thread failed".into()))).collect()
             });
-            for (((folder, _), batch), decoded) in work.iter().zip(group).zip(decoded) {
+            for (b, (((folder, _), batch), decoded)) in work.iter().zip(group).zip(decoded).enumerate() {
                 decoded?;
                 for (n, &(_, shown)) in batch.iter().enumerate() {
-                    let Ok(image) = image::open(folder.join(format!("{n:03}.jpg"))) else { continue };
+                    let file = folder.join(format!("{n:03}.jpg"));
+                    let Ok(image) = image::open(&file) else { continue };
+                    let entry = (g * decoders() + b) * BATCH + n;
+                    if nearest.contains(&entry) {
+                        if let Ok(jpeg) = fs::read(&file) {
+                            kept.insert(entry, jpeg);
+                        }
+                    }
                     let grey = image.into_luma8();
                     pictures.push(qnc_shot_detect::Picture { frame: shown, width: grey.width() as usize, height: grey.height() as usize, luma: grey.into_raw() });
                 }
@@ -247,7 +274,13 @@ pub fn analyse_file(clip_id: &str, codec: &str, path: &Path, pace: &Pace<'_>) ->
             motion: shot.motion,
         })
         .collect();
-    Ok(Found { pictures: count, shots, parts })
+    let filmstrip = (!nearest.is_empty()).then(|| nearest.iter().map(|entry| kept.get(entry).cloned()).collect::<Option<Vec<_>>>()).flatten();
+    Ok(Found { pictures: count, shots, parts, filmstrip })
+}
+
+/// The entry whose picture is shown nearest `target`.
+fn nearest_entry(entries: &[(usize, u64)], target: u64) -> usize {
+    entries.iter().enumerate().min_by_key(|(_, &(_, shown))| shown.abs_diff(target)).map_or(0, |(at, _)| at)
 }
 
 fn scratch_dir(clip_id: &str) -> PathBuf {

@@ -32,8 +32,8 @@ use std::{
 
 pub const MODULE_ID: &str = "qnc.module.filmstrip-worker";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const THUMB_WIDTH: u32 = 112;
-pub const THUMB_HEIGHT: u32 = 64;
+pub const THUMB_WIDTH: u32 = qnc_filmstrip::handed::THUMB_SIZE[0];
+pub const THUMB_HEIGHT: u32 = qnc_filmstrip::handed::THUMB_SIZE[1];
 const SEEK_PREROLL_FRAMES: u64 = 25;
 /// Filmstrips decoded at once at most: as many as the processor's threads, 2 to 16 (each decoder
 /// uses one); the cap given (the ingest's conductor, the player) says how many work now (user
@@ -588,6 +588,31 @@ fn build_timeline_background(
         LocalFilmstripArtifacts::new(&context.filmstrip_root_uri, context.filmstrip_dir.clone())?;
     let ready_before = artifacts.ready(&plan);
     let extract_started = Instant::now();
+    // The shot analysis of this process decoded the clip's pictures already: its thumbnails are
+    // written as they are, nothing is decoded again (user 2026-11-18: AI shots and filmstrip in
+    // one pass).
+    let handed = (!ready_before).then(|| qnc_filmstrip::handed::take(&request.clip_id)).flatten();
+    let from_shots = match handed {
+        Some(jpegs) => match filmstrip_from_thumbnails(&clip, context, &jpegs, &artifacts) {
+            Ok(plan) => Some(plan),
+            Err(error) => {
+                filmstrip_log(|| format!("qnc-filmstrip-worker: clip={} from_shots=failed error={error}", request.clip_id));
+                None
+            }
+        },
+        None => None,
+    };
+    if let Some(plan) = from_shots {
+        let artifact = store_artifact_from_plan(&plan);
+        return Ok(GeneratedFilmstrip {
+            artifact,
+            source_kind: plan.source_kind,
+            extraction_mode: plan.extraction_mode,
+            ready_before,
+            extract_ms: extract_started.elapsed().as_millis(),
+            total_ms: started.elapsed().as_millis(),
+        });
+    }
     // Every clip, short or long, takes the intra picture nearest each of its 13 places
     // straight from the original's own index (user 2026-10-18; short clips too, user
     // 2026-10-19: reading a clip up to 10 s through decoded up to 500 XAVC 10-bit pictures,
@@ -678,6 +703,28 @@ fn intra_pictures(
         pictures.push(picture);
     }
     Ok(Some(qnc_filmstrip::EncodedPictures { codec: codec.to_string(), pictures }))
+}
+
+/// The filmstrip of the original from thumbnails another block of this process decoded (the shot
+/// analysis, `qnc_filmstrip::handed`): written to the places of `plan_from_original` as they are.
+fn filmstrip_from_thumbnails(
+    clip: &FilmstripClipRecord,
+    context: &FilmstripContext,
+    jpegs: &[Vec<u8>],
+    artifacts: &LocalFilmstripArtifacts,
+) -> Result<FilmstripPlan, String> {
+    let started = Instant::now();
+    let plan = qnc_filmstrip::plan_from_original(&clip.snapshot, &context.filmstrip_root_uri, Some(&clip.name))?;
+    if jpegs.len() != plan.frames.len() {
+        return Err(format!("{} thumbnails for {} filmstrip frames", jpegs.len(), plan.frames.len()));
+    }
+    let output_paths = artifacts.output_paths(&plan)?;
+    prepare_output_dirs(&output_paths)?;
+    for (jpeg, target) in jpegs.iter().zip(&output_paths) {
+        fs::write(target, jpeg).map_err(|error| format!("filmstrip frame write: {error}"))?;
+    }
+    filmstrip_log(|| format!("qnc-filmstrip-worker: clip={} source=Original mode=FromShots frames={} build_ms={}", plan.clip_id, plan.frames.len(), started.elapsed().as_millis()));
+    Ok(plan)
 }
 
 /// The filmstrip of the original from its key pictures (read by the index): decoded in one

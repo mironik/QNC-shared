@@ -4,6 +4,8 @@
 //! state. It builds deterministic frame plans from already stored clip
 //! metadata and loads already generated JPEG/PNG assets for passive painting.
 
+pub mod handed;
+
 use qnc_frame_timebase::FrameTimebase;
 use qnc_image_assets::RgbaImage;
 use qnc_media_metadata::{MediaRepresentation, Rational, StreamDetails, VideoMetadata};
