@@ -246,3 +246,16 @@ fn a_fast_transcript_made_later_never_says_over_a_fine_one() {
     let said: Vec<String> = read_clip(&target, "c1").unwrap().iter().flat_map(|t| t.lines.iter().map(|l| l.text.clone())).collect();
     assert!(said.contains(&"fino".to_string()) && !said.contains(&"opet brzo".to_string()), "{said:?}");
 }
+
+#[test]
+fn the_fine_words_correct_the_rough_ones_and_keep_their_sentences() {
+    let w = |text: &str, from: u64, to: u64| Word { from, to, text: text.into() };
+    let line = |words: Vec<Word>| Line { from: words[0].from, to: words.last().unwrap().to, text: words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" "), words };
+    // Parakeet: sentences, capitals, punctuation; one wrong word and one missed.
+    let rough = [line(vec![w("Kad", 0, 10), w("je", 10, 20), w("jedna,", 20, 40)]), line(vec![w("Zagreb", 50, 70), w("promocija.", 80, 100)])];
+    // The Croatian model: lower case, no punctuation, the right words, the missed "bila".
+    let fine = [line(vec![w("kad", 0, 10), w("je", 10, 20), w("1969.", 21, 39), w("zagreb", 50, 70), w("bila", 71, 79), w("promocija", 80, 100)])];
+    let lines = corrected(&rough, &fine);
+    let said: Vec<&str> = lines.iter().map(|line| line.text.as_str()).collect();
+    assert_eq!(said, ["Kad je 1969.,", "Zagreb bila promocija."]);
+}
