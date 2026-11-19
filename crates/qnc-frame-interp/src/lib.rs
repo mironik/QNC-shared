@@ -72,7 +72,14 @@ impl Interpolator {
         }
         std::fs::copy(from, pair.join("00000001.png")).map_err(io)?;
         std::fs::copy(to, pair.join("00000002.png")).map_err(io)?;
-        let output = Command::new(&self.program)
+        let mut command = Command::new(&self.program);
+        // No console window over the form (user 2026-11-19: "otvori se terminal i prekrije formu").
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x0800_0000);
+        }
+        let output = command
             .arg("-i")
             .arg(&pair)
             .arg("-o")
