@@ -44,6 +44,12 @@ pub struct ShortClip {
     pub still_status: String,
     #[serde(default)]
     pub b_roll: bool,
+    /// Who speaks (several names, then no role) and their role, for the on-screen caption the
+    /// director puts in (user 2026-11-19); empty until written.
+    #[serde(default)]
+    pub caption_name: String,
+    #[serde(default)]
+    pub caption_role: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,6 +94,12 @@ pub enum Operation {
         shot_id: String,
         in_frame: u64,
         out_frame: u64,
+    },
+    /// The caption of a statement (user 2026-11-19): who speaks and their role, for the director.
+    SetCaption {
+        shot_id: String,
+        caption_name: String,
+        caption_role: String,
     },
     /// A SubClip (statement) removed (user 2026-11-01: the same statement saved four times).
     /// Only a short; a B-roll shot of a cover is not removed here. Its still files stay.
@@ -347,3 +359,12 @@ pub fn publish_poster_now(
 }
 #[cfg(test)]
 mod tests;
+
+/// The caption of statement `shot_id` (who speaks, their role), written and waited for.
+pub fn set_caption_now(target: &ProjectDbTarget, shot_id: &str, name: &str, role: &str) -> Result<()> {
+    let operation = Operation::SetCaption { shot_id: shot_id.into(), caption_name: name.into(), caption_role: role.into() };
+    match VirtualShotsWriter::start(target.clone())?.call(&operation)? {
+        Data::Changed => Ok(()),
+        _ => Err(wrong()),
+    }
+}
