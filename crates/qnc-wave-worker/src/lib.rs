@@ -189,19 +189,6 @@ impl WaveContext {
     }
 }
 
-/// The first camera channel of a clip as its wave read it, from the medium's start (user
-/// 2026-11-19: the statements' transcription hears it without reading the medium again).
-pub struct FirstChannel {
-    pub clip_id: String,
-    /// Samples per second of `samples`.
-    pub rate: u32,
-    /// Mono, -1..1.
-    pub samples: Vec<f32>,
-}
-
-/// Who takes a clip's [`FirstChannel`] once its wave is made (on the wave's own thread).
-pub type FirstChannelSink = Arc<dyn Fn(FirstChannel) + Send + Sync>;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WaveRequest {
     pub project_id: String,
@@ -245,8 +232,6 @@ pub struct TimelineWaveService {
     publisher: Option<Box<dyn WaveContentWrite>>,
     /// How many passes read at once, found by one short test of the medium (user 2026-10-18).
     readers: Readers,
-    /// Who takes the first camera channel of every wave read (the statements' transcription).
-    first_channel: Option<FirstChannelSink>,
 }
 
 impl Default for TimelineWaveService {
@@ -257,7 +242,6 @@ impl Default for TimelineWaveService {
             coarse: BTreeSet::new(),
             publisher: None,
             readers: Readers::default(),
-            first_channel: None,
         }
     }
 }
@@ -277,12 +261,6 @@ impl fmt::Debug for TimelineWaveService {
 }
 
 impl TimelineWaveService {
-    /// Hands the first camera channel of every wave read from now on to `sink`, once a clip's
-    /// wave is made (user 2026-11-19: "val i prijepis zajedno", the sound read once).
-    pub fn set_first_channel(&mut self, sink: Option<FirstChannelSink>) {
-        self.first_channel = sink;
-    }
-
     pub fn configure(&mut self, context: WaveContext) {
         if self.jobs.set_project(context.project_id()) {
             self.coarse.clear();
@@ -321,10 +299,6 @@ impl TimelineWaveService {
             return Ok(());
         };
         let mut after = None;
-        // The order of the clips (user 2026-11-19: "zadnji datum na kartici, najveći klipovi"):
-        // the latest day of shooting first, within a day the longest clip first (the statements
-        // are longer than the shots).
-        let mut order: std::collections::HashMap<String, (std::cmp::Reverse<String>, std::cmp::Reverse<u64>)> = std::collections::HashMap::new();
         loop {
             let page = context.content_reader.list_clips(after.clone())?;
             if page.is_empty() {
@@ -343,7 +317,6 @@ impl TimelineWaveService {
                 if self.jobs.is_ready(&clip.clip_id) {
                     continue;
                 }
-                order.insert(clip.clip_id.clone(), shooting_order(&clip.snapshot));
                 match context.content_reader.read_wave(&clip.clip_id)? {
                     Some(record) if wave_artifact_ready(&record) => {
                         self.jobs.mark_ready(&clip.clip_id);
@@ -358,7 +331,6 @@ impl TimelineWaveService {
             }
             after = Some(next_after);
         }
-        self.jobs.order_queue(|clip_id| order.get(clip_id).cloned());
         self.start_next();
         Ok(())
     }
@@ -509,9 +481,7 @@ impl TimelineWaveService {
         let readers = self.readers.try_lock().ok().and_then(|readers| *readers).unwrap_or(1);
         let shared_readers = self.readers.clone();
         let coarse = &self.coarse;
-        let sink = self.first_channel.clone();
         self.jobs.start(readers, |clip_id| {
-            let sink = sink.clone();
             let request = WaveRequest { project_id: context.project_id().to_string(), clip_id: clip_id.to_string() };
             let context = context.clone();
             let readers = shared_readers.clone();
@@ -520,7 +490,7 @@ impl TimelineWaveService {
             // over, read again before its own write had landed).
             let coarse_made = coarse.contains(clip_id);
             Some(Box::new(move |cancel: Arc<AtomicBool>| {
-                build_timeline_wave(&request, &context, &readers, coarse_made, sink.as_ref(), &cancel)
+                build_timeline_wave(&request, &context, &readers, coarse_made, &cancel)
             }))
         });
     }
@@ -574,7 +544,6 @@ fn build_timeline_wave(
     context: &WaveContext,
     readers: &Readers,
     _coarse_made: bool,
-    sink: Option<&FirstChannelSink>,
     cancel: &AtomicBool,
 ) -> Result<GeneratedWave, String> {
     if cancel.load(Ordering::Acquire) {
@@ -611,17 +580,10 @@ fn build_timeline_wave(
     // The filmstrip reads its own pictures before the waves (user 2026-10-18: up to 10 s a
     // clip is read through, a longer one gives the intra picture nearest each of 13 places),
     // so the pass reads only the sound.
-    let mut first = sink.map(|_| Vec::new());
-    let (lanes, coarse) = match coarse_first.then(|| decode_wave(&plan, media, source, true, None, cancel)).transpose()?.flatten() {
+    let (lanes, coarse) = match coarse_first.then(|| decode_wave(&plan, media, source, true, cancel)).transpose()?.flatten() {
         Some(lanes) => (lanes, true),
-        None => (decode_wave(&plan, media, source, false, first.as_mut(), cancel)?.ok_or("wave: no full wave")?, false),
+        None => (decode_wave(&plan, media, source, false, cancel)?.ok_or("wave: no full wave")?, false),
     };
-    if let (Some(sink), Some(samples)) = (sink, first.filter(|samples| !samples.is_empty())) {
-        let rate = first_stream_rate(media, &plan);
-        if let Some(rate) = rate {
-            sink(FirstChannel { clip_id: request.clip_id.clone(), rate, samples });
-        }
-    }
     let has_a2 = lanes.iter().any(|(lane, ..)| *lane == WaveLane::A2);
     let warning = (!has_a2).then(|| qnc_ui_text::text("wave.source_a2_audio_channel").to_string());
     let mut lane_peaks = Vec::new();
@@ -695,7 +657,6 @@ fn decode_wave(
     media: &MediaRepresentation,
     source: &WaveSourceBinding,
     coarse: bool,
-    mut first: Option<&mut Vec<f32>>,
     cancel: &AtomicBool,
 ) -> Result<Option<Vec<(WaveLane, Vec<f32>, Option<qnc_loudness::ChannelLoudness>)>>, String> {
     let streams = plan
@@ -731,9 +692,6 @@ fn decode_wave(
             buffer.clear();
         }
         for frame in samples.chunks_exact(channels) {
-            if let Some(first) = first.as_deref_mut() {
-                first.push(frame[0]);
-            }
             let mut at = 0;
             for (buffer, (count, _)) in bytes.iter_mut().zip(&parts) {
                 for sample in &frame[at..at + count] {
@@ -973,28 +931,6 @@ fn check_stream_supported(
     .validate(decoder_config)
     .map(|_| ())
     .map_err(|error| error.to_string())
-}
-
-/// Where a clip goes in the waves' order: the day it was shot (its creation time's date; the
-/// latest first), then its length (the longest first).
-fn shooting_order(snapshot: &Snapshot) -> (std::cmp::Reverse<String>, std::cmp::Reverse<u64>) {
-    let original = &snapshot.metadata.original;
-    let day = original.tags.get("creation_time").map(|time| time.value.chars().take(10).collect()).unwrap_or_default();
-    let millis = original.duration_seconds.as_ref().map_or(0, |seconds| {
-        let rational = &seconds.value;
-        (rational.numerator.max(0) as u64).saturating_mul(1000) / (rational.denominator.max(1) as u64)
-    });
-    (std::cmp::Reverse(day), std::cmp::Reverse(millis))
-}
-
-/// The sample rate of the first sound stream the wave reads (its first channel is the first
-/// camera channel).
-fn first_stream_rate(media: &MediaRepresentation, plan: &WavePlan) -> Option<u32> {
-    let first = plan.channels.iter().map(|channel| channel.stream_index).min()?;
-    media.streams.iter().find(|stream| stream.index.as_ref().is_some_and(|index| index.value == first)).and_then(|stream| match &stream.details {
-        StreamDetails::Audio(audio) => audio.sample_rate_hz.as_ref().map(|rate| rate.value),
-        _ => None,
-    })
 }
 
 fn audio_stream_channels(media: &MediaRepresentation, stream_index: u32) -> Result<usize, String> {

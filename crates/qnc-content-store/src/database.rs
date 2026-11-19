@@ -401,13 +401,12 @@ impl ContentStore {
                     [IMPORT_LEASE_SECONDS],
                 )
                 .map_err(err)?;
-                // The latest day of shooting on the card first, within a day the longest clip first
-                // (user 2026-11-19: "zadnji datum na kartici, najveći klipovi": the statements are longer
-                // than the shots; replaces the recording order of 2026-11-13). The day is the one the
-                // camera wrote (the date of its own clock); a clip without it comes after, by name.
+                // In the order they were recorded (user 2026-11-13: "neka uvoz po vremenu nastanka";
+                // replaces the shortest clip first of 2026-11-12). The recording time is compared as a
+                // moment, whatever zone the camera wrote; a clip without it comes after, by name.
                 let mut clip = tx.query_row(
                     &format!(
-                        "SELECT {} FROM clips WHERE import_status='queued' ORDER BY created_at_utc IS NULL, substr(created_at_utc, 1, 10) DESC, duration_seconds IS NULL, duration_seconds DESC, name, clip_id LIMIT 1",
+                        "SELECT {} FROM clips WHERE import_status='queued' ORDER BY julianday(created_at_utc) IS NULL, julianday(created_at_utc), name, clip_id LIMIT 1",
                         stored_columns(self.has_copy_of)
                     ),
                     [], row).optional().map_err(err)?;

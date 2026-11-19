@@ -59,10 +59,6 @@ pub(crate) fn short_clip_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ShortC
         out_still_uri: row.get(6)?,
         still_status: row.get(7)?,
         b_roll: false,
-        // Only the shorts' view has them (an older one, the B-roll's: empty).
-        caption_name: row.get(8).unwrap_or_default(),
-        caption_role: row.get(9).unwrap_or_default(),
-        parts: Vec::new(),
     })
 }
 
@@ -87,23 +83,4 @@ pub(crate) fn require_imported_clip(conn: &Connection, clip_id: &str) -> Result<
 
 pub(crate) fn err(error: impl std::fmt::Display) -> String {
     error.to_string()
-}
-
-/// The statements with their parts after their own IN/OUT, in order (user 2026-11-19). A table
-/// made before the parts: none.
-pub(crate) fn with_parts(conn: &Connection, mut shots: Vec<ShortClip>) -> Result<Vec<ShortClip>> {
-    if !object_exists(conn, "table", "virtual_shot_parts")? {
-        return Ok(shots);
-    }
-    let mut statement = conn
-        .prepare("SELECT clip_id, in_frame, out_frame FROM virtual_shot_parts WHERE shot_id = ?1 ORDER BY part_index")
-        .map_err(err)?;
-    for shot in &mut shots {
-        shot.parts = statement
-            .query_map([&shot.shot_id], |row| Ok(ShotPart { clip_id: row.get(0)?, in_frame: row.get::<_, i64>(1)?.max(0) as u64, out_frame: row.get::<_, i64>(2)?.max(0) as u64 }))
-            .map_err(err)?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(err)?;
-    }
-    Ok(shots)
 }

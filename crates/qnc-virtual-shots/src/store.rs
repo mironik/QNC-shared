@@ -11,7 +11,7 @@ pub(crate) use rows::*;
 use schema::*;
 
 /// The tables this module owns; it writes no other.
-const OWNED: [&str; 3] = ["virtual_shots", "virtual_shot_numbers", "virtual_shot_parts"];
+const OWNED: [&str; 2] = ["virtual_shots", "virtual_shot_numbers"];
 
 pub(crate) struct Store {
     conn: Connection,
@@ -62,7 +62,6 @@ impl Store {
             Operation::ForgetCoverShot { shot_id } => self.forget_cover_shot(shot_id),
             Operation::ForgetShort { shot_id } => {
                 self.conn.execute("DELETE FROM virtual_shots WHERE shot_id = ?1 AND class = 'short'", [shot_id]).map_err(err)?;
-                self.conn.execute("DELETE FROM virtual_shot_parts WHERE shot_id = ?1", [shot_id]).map_err(err)?;
                 Ok(Data::Changed)
             }
             Operation::ConfirmCoverShot { shot_id } => self.confirm_cover_shot(shot_id),
@@ -70,8 +69,6 @@ impl Store {
                 self.forget_unconfirmed_cover_shots(*older_than_seconds)
             }
             Operation::TrimShort { shot_id, in_frame, out_frame } => self.trim_short(shot_id, *in_frame, *out_frame),
-            Operation::SetCaption { shot_id, caption_name, caption_role } => self.set_caption(shot_id, caption_name, caption_role),
-            Operation::AddPart { shot_id, clip_id, in_frame, out_frame } => self.add_part(shot_id, clip_id, *in_frame, *out_frame),
             Operation::ListShorts => self.list_shorts(),
             Operation::ListBroll => self.list_b_roll(),
             Operation::MarkShortStills {
@@ -157,26 +154,17 @@ impl Store {
         if !object_exists(&self.conn, "view", "public_short_clips")? {
             return Ok(Data::ShortClips(Vec::new()));
         }
-        // With the caption (user 2026-11-19), then a view made before it.
-        let current_sql = [
-            "SELECT shot_id, clip_id, in_frame, out_frame, name,
-                in_still_uri, out_still_uri, still_status, caption_name, caption_role
-            FROM public_short_clips
-            ORDER BY created_at_utc, shot_id",
-            "SELECT shot_id, clip_id, in_frame, out_frame, name,
+        let current_sql = "SELECT shot_id, clip_id, in_frame, out_frame, name,
                 in_still_uri, out_still_uri, still_status
             FROM public_short_clips
-            ORDER BY created_at_utc, shot_id",
-        ];
-        for sql in current_sql {
-            if let Ok(mut statement) = self.conn.prepare(sql) {
-                let rows: Vec<ShortClip> = statement
-                    .query_map([], short_clip_row)
-                    .map_err(err)?
-                    .collect::<rusqlite::Result<Vec<_>>>()
-                    .map_err(err)?;
-                return Ok(Data::ShortClips(with_parts(&self.conn, rows)?));
-            }
+            ORDER BY created_at_utc, shot_id";
+        if let Ok(mut statement) = self.conn.prepare(current_sql) {
+            let rows = statement
+                .query_map([], short_clip_row)
+                .map_err(err)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(err)?;
+            return Ok(Data::ShortClips(rows));
         }
         let mut statement = self
             .conn
@@ -198,9 +186,6 @@ impl Store {
                     out_still_uri: None,
                     still_status: "pending".into(),
                     b_roll: false,
-                    caption_name: String::new(),
-                    caption_role: String::new(),
-                    parts: Vec::new(),
                 })
             })
             .map_err(err)?
@@ -303,33 +288,6 @@ impl Store {
             )
             .map_err(err)?;
         Ok(Data::Changed)
-    }
-
-    fn add_part(&mut self, shot_id: &str, clip_id: &str, in_frame: u64, out_frame: u64) -> Result<Data> {
-        if out_frame <= in_frame {
-            return Err(qnc_ui_text::text("story.out_after_in").into());
-        }
-        let known: bool = self.conn.query_row("SELECT count(*) = 1 FROM virtual_shots WHERE shot_id = ?1 AND class = 'short'", [shot_id], |row| row.get(0)).map_err(err)?;
-        if !known {
-            return Err(qnc_ui_text::text("story.msg.subclip_not_found").into());
-        }
-        require_imported_clip(&self.conn, clip_id)?;
-        let next: i64 = self.conn.query_row("SELECT coalesce(max(part_index), 0) + 1 FROM virtual_shot_parts WHERE shot_id = ?1", [shot_id], |row| row.get(0)).map_err(err)?;
-        self.conn
-            .execute("INSERT INTO virtual_shot_parts (shot_id, part_index, clip_id, in_frame, out_frame) VALUES (?1, ?2, ?3, ?4, ?5)", params![shot_id, next, clip_id, in_frame as i64, out_frame as i64])
-            .map_err(err)?;
-        Ok(Data::Changed)
-    }
-
-    fn set_caption(&mut self, shot_id: &str, name: &str, role: &str) -> Result<Data> {
-        let changed = self
-            .conn
-            .execute("UPDATE virtual_shots SET caption_name = ?2, caption_role = ?3 WHERE shot_id = ?1 AND class = 'short'", params![shot_id, name.trim(), role.trim()])
-            .map_err(err)?;
-        match changed {
-            0 => Err(qnc_ui_text::text("story.msg.subclip_not_found").into()),
-            _ => Ok(Data::Changed),
-        }
     }
 
     fn confirm_cover_shot(&mut self, shot_id: &str) -> Result<Data> {

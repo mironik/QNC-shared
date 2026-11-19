@@ -29,7 +29,7 @@ pub use keys::KeyPictures;
 pub const MODULE_ID: &str = "qnc.module.shot-analysis";
 
 /// Where a media URI is on this computer; `None` when it is not here.
-pub type LocalMedia<'a> = dyn Fn(&str) -> Option<PathBuf> + Sync + 'a;
+pub type LocalMedia<'a> = dyn Fn(&str) -> Option<PathBuf> + 'a;
 
 /// The pictures a shot analysis looks at: their size and at most how many a second (two: a
 /// camera's long GOP gives about two intra pictures a second; user 2026-11-18 "spusti na 2", an
@@ -71,29 +71,18 @@ impl ShotProject {
 /// What the caller says while the analysis runs.
 pub struct Pace<'a> {
     /// The player plays now: the analysis waits.
-    pub player_plays: &'a (dyn Fn() -> bool + Sync),
+    pub player_plays: &'a dyn Fn() -> bool,
     /// The clip a preview has open, analysed first.
-    pub wanted: &'a (dyn Fn() -> Option<String> + Sync),
+    pub wanted: &'a dyn Fn() -> Option<String>,
     /// Which clips this turn may look at (user 2026-11-12: a clip whose first channel holds a
     /// statement is not analysed); `&|_| true` for every clip.
-    pub takes: &'a (dyn Fn(&str) -> bool + Sync),
-    /// How many clips may be analysed at once now (user 2026-11-19: "kad završi prijepis AI
-    /// kadrovima daš maksimalnu raspoloživu snagu"); none while the transcription runs ("dok traje
-    /// prijepis ne daj mu ništa"): the analysis then waits.
-    pub workers: &'a (dyn Fn() -> usize + Sync),
+    pub takes: &'a dyn Fn(&str) -> bool,
     /// The run stops (the project closed, its lease lost).
     pub cancel: &'a AtomicBool,
 }
 
-/// How many clips at most are analysed at once on this computer: as many as half its threads.
-pub fn most_workers() -> usize {
-    (std::thread::available_parallelism().map_or(2, usize::from) / 2).max(1)
-}
-
 /// Analyses every imported clip of the project not analysed yet; returns how many it kept.
-/// Nothing is done when the project has shot analysis off. As many clips at once as
-/// `pace.workers` says (asked again before every clip): most clips are short, one batch of
-/// pictures, so one clip keeps one decoder busy (2026-11-19 measurement: 58 ms a picture).
+/// Nothing is done when the project has shot analysis off.
 pub fn analyse_missing(project: &ShotProject, local_media: &LocalMedia<'_>, lease: Option<WriteLease>, pace: &Pace<'_>) -> Result<usize, String> {
     let (reader, settings) = (&project.reader, &project.settings);
     if !settings.ai_feature(qnc_ai_features::SHOT_ANALYSIS).unwrap_or(false) {
@@ -103,7 +92,7 @@ pub fn analyse_missing(project: &ShotProject, local_media: &LocalMedia<'_>, leas
     let analysed = qnc_shot_db::read_analysed(&shots_db)?;
     let catalog = qnc_content_read::ContentReader::for_project(reader, settings)?;
     let waiting = catalog.records_waiting()?;
-    let remaining: Vec<String> = catalog
+    let mut remaining: Vec<String> = catalog
         .summaries()?
         .into_iter()
         .filter(|clip| clip.imported && !analysed.contains(&clip.clip_id) && !waiting.contains(&clip.clip_id) && (pace.takes)(&clip.clip_id))
@@ -117,108 +106,51 @@ pub fn analyse_missing(project: &ShotProject, local_media: &LocalMedia<'_>, leas
     // goes on and keeps none.
     let strips = strip_folder(reader, settings);
     let content = ContentTarget::for_project(reader, settings)?;
-    let remaining = std::sync::Mutex::new(remaining);
-    let kept = std::sync::atomic::AtomicUsize::new(0);
-    let failure = std::sync::Mutex::new(None::<String>);
-    let busy = std::sync::atomic::AtomicUsize::new(0);
-    let failed = || failure.lock().unwrap_or_else(|e| e.into_inner()).is_some();
-    let fail = |error: String| *failure.lock().unwrap_or_else(|e| e.into_inner()) = Some(error);
-    std::thread::scope(|scope| {
-        for worker in 0..most_workers() {
-            let (remaining, kept, busy, strips, content, shots_db, lease, failed, fail) = (&remaining, &kept, &busy, &strips, &content, &shots_db, &lease, &failed, &fail);
-            scope.spawn(move || {
-                let mut client = match content.open(Access::ReadOnly) {
-                    Ok(client) => client,
-                    Err(error) => return fail(error.to_string()),
-                };
-                loop {
-                    if failed() || !wait_for_player(pace) {
-                        return;
-                    }
-                    // A worker past the number allowed now waits; the clips the others have go on.
-                    if worker >= (pace.workers)() {
-                        if remaining.lock().unwrap_or_else(|e| e.into_inner()).is_empty() {
-                            return;
-                        }
-                        std::thread::sleep(Duration::from_millis(200));
-                        continue;
-                    }
-                    let clip_id = {
-                        let mut remaining = remaining.lock().unwrap_or_else(|e| e.into_inner());
-                        if remaining.is_empty() {
-                            return;
-                        }
-                        let at = (pace.wanted)().and_then(|clip| remaining.iter().position(|id| *id == clip)).unwrap_or(0);
-                        remaining.remove(at)
-                    };
-                    busy.fetch_add(1, Ordering::Relaxed);
-                    let done = analyse_one(&mut client, &clip_id, local_media, strips, shots_db, lease, pace, busy);
-                    busy.fetch_sub(1, Ordering::Relaxed);
-                    match done {
-                        Ok(true) => {
-                            kept.fetch_add(1, Ordering::Relaxed);
-                        }
-                        Ok(false) => {}
-                        Err(error) => fail(error),
-                    }
-                }
-            });
+    let mut client = content.open(Access::ReadOnly)?;
+    let mut kept = 0;
+    while !remaining.is_empty() {
+        if !wait_for_player(pace) {
+            break;
         }
-    });
-    match failure.into_inner().unwrap_or_else(|e| e.into_inner()) {
-        Some(error) => Err(error),
-        None => Ok(kept.into_inner()),
-    }
-}
-
-/// Analyses one clip and keeps what it found; `false` when it was skipped or the run stopped.
-#[allow(clippy::too_many_arguments)]
-fn analyse_one(
-    client: &mut qnc_content_store::ContentClient,
-    clip_id: &str,
-    local_media: &LocalMedia<'_>,
-    strips: &Option<(PathBuf, String)>,
-    shots_db: &ProjectDbTarget,
-    lease: &Option<WriteLease>,
-    pace: &Pace<'_>,
-    busy: &std::sync::atomic::AtomicUsize,
-) -> Result<bool, String> {
-    let Some(clip) = client.read(clip_id)? else { return Ok(false) };
-    let started = Instant::now();
-    let original = clip.clip.snapshot.metadata.original.media_uri.clone();
-    let Some(path) = local_media(&original) else {
-        log(format!("shot-analysis clip={clip_id} skipped: the original is not on this computer"));
-        return Ok(false);
-    };
-    let found = analyse(clip_id, &clip.clip.snapshot, &path, pace);
-    if pace.cancel.load(Ordering::Relaxed) {
-        return Ok(false);
-    }
-    let record = match found {
-        Ok(found) => {
-            let strip = strips.as_ref().and_then(|(folder, base)| match write_strip(folder, base, clip_id, &found.decoded) {
-                Ok(strip) => Some(strip),
-                Err(error) => {
-                    log(format!("shot-analysis clip={clip_id} strip not kept: {error}"));
-                    None
-                }
-            });
-            ClipShots { clip_id: clip_id.to_string(), media_uri: original, pictures: found.pictures, shots: found.shots, parts: found.parts, error: String::new(), took_ms: 0, strip }
+        let at = (pace.wanted)().and_then(|clip| remaining.iter().position(|id| *id == clip)).unwrap_or(0);
+        let clip_id = remaining.remove(at);
+        let Some(clip) = client.read(&clip_id)? else { continue };
+        let started = Instant::now();
+        let original = clip.clip.snapshot.metadata.original.media_uri.clone();
+        let Some(path) = local_media(&original) else {
+            log(format!("shot-analysis clip={clip_id} skipped: the original is not on this computer"));
+            continue;
+        };
+        let found = analyse(&clip_id, &clip.clip.snapshot, &path, pace);
+        if pace.cancel.load(Ordering::Relaxed) {
+            break;
         }
-        Err(error) => ClipShots { clip_id: clip_id.to_string(), media_uri: original, pictures: 0, shots: Vec::new(), parts: Vec::new(), error, took_ms: 0, strip: None },
-    };
-    let record = ClipShots { took_ms: started.elapsed().as_millis() as u64, ..record };
-    log(format!(
-        "shot-analysis clip={clip_id} pictures={} shots={} parts={} ms={} workers={} error={}",
-        record.pictures,
-        record.shots.len(),
-        record.parts.len(),
-        record.took_ms,
-        busy.load(Ordering::Relaxed),
-        record.error
-    ));
-    qnc_shot_db::save(shots_db, record, lease.clone())?;
-    Ok(true)
+        let record = match found {
+            Ok(found) => {
+                let strip = strips.as_ref().and_then(|(folder, base)| match write_strip(folder, base, &clip_id, &found.decoded) {
+                    Ok(strip) => Some(strip),
+                    Err(error) => {
+                        log(format!("shot-analysis clip={clip_id} strip not kept: {error}"));
+                        None
+                    }
+                });
+                ClipShots { clip_id: clip_id.clone(), media_uri: original, pictures: found.pictures, shots: found.shots, parts: found.parts, error: String::new(), took_ms: 0, strip }
+            }
+            Err(error) => ClipShots { clip_id: clip_id.clone(), media_uri: original, pictures: 0, shots: Vec::new(), parts: Vec::new(), error, took_ms: 0, strip: None },
+        };
+        let record = ClipShots { took_ms: started.elapsed().as_millis() as u64, ..record };
+        log(format!(
+            "shot-analysis clip={clip_id} pictures={} shots={} parts={} ms={} error={}",
+            record.pictures,
+            record.shots.len(),
+            record.parts.len(),
+            record.took_ms,
+            record.error
+        ));
+        qnc_shot_db::save(&shots_db, record, lease.clone())?;
+        kept += 1;
+    }
+    Ok(kept)
 }
 
 /// Waits while the player plays; false when the run stops.

@@ -62,17 +62,9 @@ pub struct TimelineProjection {
 /// The window of a timeline enlarged on `[start, end)` (a slot, a statement; user 2026-10-21,
 /// 2026-11-09): it takes 70 % of the width and what is around it 15 % on each side.
 pub fn enlarged(start: u64, end: u64, total: u64) -> (u64, u64) {
-    enlarged_by(start, end, total, 0.15)
-}
-
-/// A statement enlarged on the source timeline (user 2026-11-19: "smanji na 10%"): what is
-/// around it takes 10 % of the width on each side.
-pub const STATEMENT_AROUND: f64 = 0.10;
-
-/// The window of `[start, end)` with `around` of the width on each side.
-pub fn enlarged_by(start: u64, end: u64, total: u64, around: f64) -> (u64, u64) {
+    const AROUND: f64 = 0.15;
     let length = end.saturating_sub(start).max(1) as f64;
-    let side = (length * around / (1.0 - 2.0 * around)).round() as u64;
+    let side = (length * AROUND / (1.0 - 2.0 * AROUND)).round() as u64;
     (start.saturating_sub(side), end.saturating_add(side).min(total.max(end)))
 }
 

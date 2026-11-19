@@ -32,11 +32,6 @@ pub struct VirtualShortCard {
     pub poster_image: Option<Arc<qnc_image_assets::RgbaImage>>,
     /// The shot of a cover: the B-roll tab shows it, the Virtual tab does not.
     pub b_roll: bool,
-    /// Who speaks and their role (the caption the director puts in, user 2026-11-19).
-    pub caption_name: String,
-    pub caption_role: String,
-    /// The parts after its own IN/OUT (a statement of several parts, user 2026-11-19).
-    pub parts: Vec<qnc_virtual_shots::ShotPart>,
 }
 
 /// The chosen SubClip (not a B-roll shot) as `(shot, clip, (in, out))`, for its fine tuning.
@@ -45,22 +40,10 @@ pub fn chosen<'a>(cards: &'a [VirtualShortCard], shot_id: Option<&str>) -> Optio
     Some((card.shot_id.as_str(), card.clip_id.as_str(), (card.in_frame, card.out_frame)))
 }
 
-/// The parts of the chosen statement in the clip shown, its own IN/OUT first, while it has parts
-/// (user 2026-11-19: a compound statement lights all its parts in the transcript; from the
-/// statement's record, the text is the transcript's).
-pub fn chosen_parts(cards: &[VirtualShortCard], shot_id: Option<&str>, shown_clip: Option<&str>) -> Option<(String, Vec<(u64, u64)>)> {
-    let card = cards.iter().find(|card| Some(card.shot_id.as_str()) == shot_id && !card.b_roll && !card.parts.is_empty())?;
-    let shown = shown_clip?;
-    let own = (card.clip_id == shown).then_some((card.in_frame, card.out_frame));
-    let parts = card.parts.iter().filter(|part| part.clip_id == shown).map(|part| (part.in_frame, part.out_frame));
-    Some((shown.to_string(), own.into_iter().chain(parts).collect()))
-}
-
 /// The IN/OUT of the chosen statement while its clip is the one shown: the source timeline
 /// enlarges them (user 2026-11-09).
 pub fn shown_marks(cards: &[VirtualShortCard], shot_id: Option<&str>, shown_clip: Option<&str>) -> Option<(u64, u64)> {
-    let card = cards.iter().find(|card| Some(card.shot_id.as_str()) == shot_id && !card.b_roll && Some(card.clip_id.as_str()) == shown_clip)?;
-    Some((card.in_frame, card.out_frame))
+    chosen(cards, shot_id).filter(|(_, clip, _)| Some(*clip) == shown_clip).map(|(_, _, marks)| marks)
 }
 
 /// The card of `shot_id` to open, or the text code of why it cannot be: it is gone or its clip
@@ -100,9 +83,6 @@ pub fn build_card(
         poster_uri: row.in_still_uri,
         poster_image: None,
         b_roll: row.b_roll,
-        caption_name: row.caption_name,
-        caption_role: row.caption_role,
-        parts: row.parts,
     }
 }
 
@@ -166,9 +146,6 @@ pub fn saving(cards: &mut Vec<VirtualShortCard>, clips: &[qnc_clip_row::ClipRow]
         poster_uri: None,
         poster_image: in_picture.or_else(|| clip.thumb_image.clone()),
         b_roll: false,
-        caption_name: String::new(),
-        caption_role: String::new(),
-        parts: Vec::new(),
     });
 }
 
@@ -240,9 +217,6 @@ mod tests {
             out_still_uri: Some("qnc://local/project/p1/virtual_shorts/shot-1/out.jpg".into()),
             still_status: "ready".into(),
             b_roll: false,
-            caption_name: String::new(),
-            caption_role: String::new(),
-            parts: Vec::new(),
         }
     }
 

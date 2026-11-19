@@ -6286,7 +6286,6 @@ dependencies = [
  "candle-core",
  "candle-nn",
  "qnc-transcribe-jobs",
- "rayon",
  "serde_json",
 ]
 

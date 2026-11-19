@@ -188,7 +188,7 @@ impl Wav2Vec2 {
         let mut x = Tensor::from_slice(samples, (1, 1, samples.len()), &self.device)?;
         for layer in &self.convs {
             x = layer.conv.forward(&x)?;
-            x = norm_gelu_channels(&x, &layer.norm, self.config.eps)?;
+            x = layer.norm.forward(&x.transpose(1, 2)?)?.transpose(1, 2)?.gelu_erf()?;
         }
         // [1, channels, time] -> [1, time, channels]
         let x = self.projection_norm.forward(&x.transpose(1, 2)?.contiguous()?)?;
@@ -196,7 +196,7 @@ impl Wav2Vec2 {
         // The positional convolution: on the time axis, its last frame dropped (an even kernel).
         let time = h.dim(1)?;
         let pos = h.transpose(1, 2)?.contiguous()?.conv1d(&self.pos_weight, self.config.pos_kernel / 2, 1, 1, self.config.pos_groups)?;
-        let pos = gelu(&pos.broadcast_add(&self.pos_bias.reshape((1, self.config.hidden, 1))?)?.narrow(2, 0, time)?)?;
+        let pos = pos.broadcast_add(&self.pos_bias.reshape((1, self.config.hidden, 1))?)?.narrow(2, 0, time)?.gelu_erf()?;
         h = (h + pos.transpose(1, 2)?)?;
         let heads = self.config.heads;
         let head_dim = self.config.hidden / heads;
@@ -212,7 +212,7 @@ impl Wav2Vec2 {
             let attended = weights.matmul(&v)?.transpose(1, 2)?.contiguous()?.reshape((1, time, self.config.hidden))?;
             h = (residual + layer.out.forward(&attended)?)?;
             let x = layer.final_norm.forward(&h)?;
-            let x = layer.down.forward(&gelu(&layer.up.forward(&x)?)?)?;
+            let x = layer.down.forward(&layer.up.forward(&x)?.gelu_erf()?)?;
             h = (h + x)?;
         }
         let h = self.encoder_norm.forward(&h)?;
@@ -301,67 +301,4 @@ fn read_vocab(path: &Path, size: usize) -> Result<Vec<String>, String> {
         *tokens.get_mut(id).ok_or("vocab.json: an id past the model's letters")? = letter;
     }
     Ok(tokens)
-}
-
-/// How many elements one thread takes at once.
-const CHUNK: usize = 16 * 1024;
-
-/// GELU (erf), as candle's `gelu_erf`, on every core (user 2026-11-19: wav2vec2 was not real time;
-/// candle's element-wise ops run on one core, 0.4 s for the first convolution's output alone).
-fn gelu(t: &Tensor) -> candle_core::Result<Tensor> {
-    use rayon::prelude::*;
-    let shape = t.shape().clone();
-    let mut values = t.flatten_all()?.to_vec1::<f32>()?;
-    values.par_chunks_mut(CHUNK).for_each(|chunk| {
-        for value in chunk {
-            *value = (candle_core::cpu::erf::erf_f32(*value * std::f32::consts::FRAC_1_SQRT_2) + 1.) * 0.5 * *value;
-        }
-    });
-    Tensor::from_vec(values, shape, t.device())
-}
-
-/// The layer norm of a convolution's output `[1, channels, time]` over its channels, then GELU,
-/// in that layout on every core (as `norm(x^T)^T` then `gelu_erf`, without the two transposes).
-fn norm_gelu_channels(x: &Tensor, norm: &LayerNorm, eps: f64) -> candle_core::Result<Tensor> {
-    use rayon::prelude::*;
-    let (_, channels, time) = x.dims3()?;
-    let values = x.flatten_all()?.to_vec1::<f32>()?;
-    let weight = norm.weight().to_vec1::<f32>()?;
-    let bias = match norm.bias() {
-        Some(bias) => bias.to_vec1::<f32>()?,
-        None => vec![0.0; channels],
-    };
-    // Each time step's mean and 1/std over the channels, a run of steps per thread (a channel's
-    // steps are next to each other).
-    const STEPS: usize = 256;
-    let stats: Vec<(f32, f32)> = (0..time.div_ceil(STEPS))
-        .into_par_iter()
-        .flat_map_iter(|run| {
-            let (from, to) = (run * STEPS, ((run + 1) * STEPS).min(time));
-            let mut sum = vec![0f64; to - from];
-            let mut squares = vec![0f64; to - from];
-            for channel in 0..channels {
-                let row = &values[channel * time + from..channel * time + to];
-                for (i, &value) in row.iter().enumerate() {
-                    sum[i] += f64::from(value);
-                    squares[i] += f64::from(value) * f64::from(value);
-                }
-            }
-            (0..to - from).map(move |i| {
-                let mean = sum[i] / channels as f64;
-                let variance = (squares[i] / channels as f64 - mean * mean).max(0.0);
-                (mean as f32, (1.0 / (variance + eps).sqrt()) as f32)
-            }).collect::<Vec<_>>()
-        })
-        .collect();
-    let mut out = vec![0f32; values.len()];
-    out.par_chunks_mut(time).enumerate().for_each(|(channel, row)| {
-        let (w, b) = (weight[channel], bias[channel]);
-        for (t, value) in row.iter_mut().enumerate() {
-            let (mean, rstd) = stats[t];
-            let normal = (values[channel * time + t] - mean) * rstd * w + b;
-            *value = (candle_core::cpu::erf::erf_f32(normal * std::f32::consts::FRAC_1_SQRT_2) + 1.) * 0.5 * normal;
-        }
-    });
-    Tensor::from_vec(out, (1, channels, time), x.device())
 }

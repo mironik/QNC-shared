@@ -140,11 +140,6 @@ impl<O: Send + 'static> Jobs<O> {
         true
     }
 
-    /// Puts the waiting clips in the order of `key` (smallest first; equal keys keep their order).
-    pub fn order_queue<K: Ord>(&mut self, mut key: impl FnMut(&str) -> K) {
-        self.queue.make_contiguous().sort_by_cached_key(|clip_id| key(clip_id));
-    }
-
     fn to_front(&mut self, clip_id: &str) -> bool {
         let Some(index) = self.queue.iter().position(|queued| queued == clip_id) else {
             return false;

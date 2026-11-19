@@ -95,9 +95,6 @@ pub struct Choice {
     /// How it can be solved.
     pub solution: String,
     pub options: Vec<ChoiceOption>,
-    /// Fields the user writes in (user 2026-11-19: the name and the role of who speaks), filled
-    /// in beforehand with their values; an option that `takes_fields` carries what is written.
-    pub fields: Vec<ChoiceField>,
 }
 
 /// One option: a catalog action and its label.
@@ -109,14 +106,12 @@ pub struct ChoiceOption {
     pub strong: bool,
     /// What the action is about (a group's code, an id), carried with it.
     pub target: Option<String>,
-    /// Its target is what is written in the fields (`fields_of` reads it back).
-    pub takes_fields: bool,
 }
 
 impl ChoiceOption {
     /// An option of `action_id` with `label`.
     pub fn new(action_id: impl Into<String>, label: impl Into<String>, strong: bool) -> Self {
-        Self { action_id: action_id.into(), label: label.into(), strong, target: None, takes_fields: false }
+        Self { action_id: action_id.into(), label: label.into(), strong, target: None }
     }
 
     /// The option with the target its action carries.
@@ -124,34 +119,6 @@ impl ChoiceOption {
         self.target = Some(target.into());
         self
     }
-}
-
-/// A field of a question: its label and what is written in it.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ChoiceField {
-    pub label: String,
-    pub value: String,
-}
-
-impl ChoiceOption {
-    /// The option carries what is written in the fields of its question as its target.
-    pub fn taking_fields(mut self) -> Self {
-        self.takes_fields = true;
-        self
-    }
-}
-
-/// Between the values of the fields in a target.
-const FIELD_SEPARATOR: char = '\u{1f}';
-
-/// The target of an option that takes the fields: their values in order.
-pub fn fields_target(fields: &[ChoiceField]) -> String {
-    fields.iter().map(|field| field.value.replace(FIELD_SEPARATOR, " ")).collect::<Vec<_>>().join(&FIELD_SEPARATOR.to_string())
-}
-
-/// The values of the fields an answer carried, in order.
-pub fn fields_of(target: &str) -> Vec<String> {
-    target.split(FIELD_SEPARATOR).map(str::to_string).collect()
 }
 
 /// The question a piece asks over the form, for the host of the form to draw (user 2026-11-10:
