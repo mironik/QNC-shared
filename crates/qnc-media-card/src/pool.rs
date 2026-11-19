@@ -35,7 +35,7 @@ pub struct PoolGrid<'a> {
     pub id_salt: &'a str,
 }
 
-pub fn show_pool<T: PoolItem>(ui: &mut egui::Ui, items: &[&T], grid: &PoolGrid<'_>, look: &PoolLook<'_>) -> Option<CardGridAction> {
+pub fn show_pool<T: PoolItem + ?Sized>(ui: &mut egui::Ui, items: &[&T], grid: &PoolGrid<'_>, look: &PoolLook<'_>) -> Option<CardGridAction> {
     let rows: Vec<CardRow<'_>> = items.iter().map(|item| card_row(*item, grid, look)).collect();
     let no_textures = std::collections::HashMap::new();
     let input = CardGridInput {
@@ -56,7 +56,7 @@ pub fn show_pool<T: PoolItem>(ui: &mut egui::Ui, items: &[&T], grid: &PoolGrid<'
     .inner
 }
 
-fn card_row<'a, T: PoolItem>(item: &'a T, grid: &PoolGrid<'_>, look: &PoolLook<'a>) -> CardRow<'a> {
+fn card_row<'a, T: PoolItem + ?Sized>(item: &'a T, grid: &PoolGrid<'_>, look: &PoolLook<'a>) -> CardRow<'a> {
     let (import_status, imported_media) = item.card_import();
     let (status_proxy, status_original) = pipeline_statuses(import_status, imported_media);
     let (poster_uri, poster) = item.card_poster();
