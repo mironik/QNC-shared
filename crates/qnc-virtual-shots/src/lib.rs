@@ -50,6 +50,11 @@ pub struct ShortClip {
     pub caption_name: String,
     #[serde(default)]
     pub caption_role: String,
+    /// The parts after its own IN/OUT: a statement made of several parts, its stammers and
+    /// repeats left out (user 2026-11-19: "svaka izjava može postati složena"); only IN/OUT,
+    /// the text is read from the transcript.
+    #[serde(default)]
+    pub parts: Vec<ShotPart>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,6 +97,13 @@ pub enum Operation {
     /// the old cut again): its IN/OUT within its clip; its stills are made again.
     TrimShort {
         shot_id: String,
+        in_frame: u64,
+        out_frame: u64,
+    },
+    /// A part added to statement `shot_id` (user 2026-11-19): `[in_frame, out_frame)` of `clip_id`.
+    AddPart {
+        shot_id: String,
+        clip_id: String,
         in_frame: u64,
         out_frame: u64,
     },
@@ -363,6 +375,23 @@ mod tests;
 /// The caption of statement `shot_id` (who speaks, their role), written and waited for.
 pub fn set_caption_now(target: &ProjectDbTarget, shot_id: &str, name: &str, role: &str) -> Result<()> {
     let operation = Operation::SetCaption { shot_id: shot_id.into(), caption_name: name.into(), caption_role: role.into() };
+    match VirtualShotsWriter::start(target.clone())?.call(&operation)? {
+        Data::Changed => Ok(()),
+        _ => Err(wrong()),
+    }
+}
+
+/// A part of a statement after its own IN/OUT: its clip and `[in_frame, out_frame)`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShotPart {
+    pub clip_id: String,
+    pub in_frame: u64,
+    pub out_frame: u64,
+}
+
+/// Adds the part `[in_frame, out_frame)` of `clip_id` to statement `shot_id`, written and waited for.
+pub fn add_part_now(target: &ProjectDbTarget, shot_id: &str, clip_id: &str, in_frame: u64, out_frame: u64) -> Result<()> {
+    let operation = Operation::AddPart { shot_id: shot_id.into(), clip_id: clip_id.into(), in_frame, out_frame };
     match VirtualShotsWriter::start(target.clone())?.call(&operation)? {
         Data::Changed => Ok(()),
         _ => Err(wrong()),

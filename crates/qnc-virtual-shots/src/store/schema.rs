@@ -8,6 +8,14 @@ pub(crate) fn ensure_virtual_shots_schema(conn: &Connection) -> Result<()> {
             last INTEGER NOT NULL,
             PRIMARY KEY (clip_id, class)
         );
+        CREATE TABLE IF NOT EXISTS virtual_shot_parts (
+            shot_id TEXT NOT NULL,
+            part_index INTEGER NOT NULL,
+            clip_id TEXT NOT NULL,
+            in_frame INTEGER NOT NULL,
+            out_frame INTEGER NOT NULL,
+            PRIMARY KEY (shot_id, part_index)
+        );
         CREATE TABLE IF NOT EXISTS virtual_shots (
             shot_id TEXT PRIMARY KEY,
             clip_id TEXT NOT NULL,

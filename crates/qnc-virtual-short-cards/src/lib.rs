@@ -35,6 +35,8 @@ pub struct VirtualShortCard {
     /// Who speaks and their role (the caption the director puts in, user 2026-11-19).
     pub caption_name: String,
     pub caption_role: String,
+    /// The parts after its own IN/OUT (a statement of several parts, user 2026-11-19).
+    pub parts: Vec<qnc_virtual_shots::ShotPart>,
 }
 
 /// The chosen SubClip (not a B-roll shot) as `(shot, clip, (in, out))`, for its fine tuning.
@@ -88,6 +90,7 @@ pub fn build_card(
         b_roll: row.b_roll,
         caption_name: row.caption_name,
         caption_role: row.caption_role,
+        parts: row.parts,
     }
 }
 
@@ -153,6 +156,7 @@ pub fn saving(cards: &mut Vec<VirtualShortCard>, clips: &[qnc_clip_row::ClipRow]
         b_roll: false,
         caption_name: String::new(),
         caption_role: String::new(),
+        parts: Vec::new(),
     });
 }
 
@@ -226,6 +230,7 @@ mod tests {
             b_roll: false,
             caption_name: String::new(),
             caption_role: String::new(),
+            parts: Vec::new(),
         }
     }
 
