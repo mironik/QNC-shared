@@ -267,6 +267,10 @@ struct Job {
     /// 2026-11-18: the graphics card and the processor together).
     #[serde(default)]
     fast_with: Vec<String>,
+    /// The engine that hears a clip while it plays, a little ahead of the playhead (user
+    /// 2026-11-19: Nemotron streaming while the player plays, wav2vec2 refines in the pauses).
+    #[serde(default)]
+    live: Option<String>,
     engines: Vec<Engine>,
 }
 
@@ -277,6 +281,8 @@ pub enum Quality {
     Best,
     /// Fast on the processor: the trim zoom, a quick pass over many clips.
     Fast,
+    /// While the clip plays: real time beside the player (never a fine transcript).
+    Live,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -374,6 +380,7 @@ pub fn transcriber_for(path: &Path, quality: Quality) -> Result<Transcriber, Str
     let selected = match quality {
         Quality::Best => file.transcribe.selected.clone(),
         Quality::Fast => file.transcribe.fast.clone().ok_or("the AI catalog of this host has no fast transcription engine")?,
+        Quality::Live => file.transcribe.live.clone().ok_or("the AI catalog of this host has no live transcription engine")?,
     };
     engine_in(&file, folder, &selected)
 }
