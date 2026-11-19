@@ -151,3 +151,24 @@ fn a_clip_without_work_is_passed_over() {
     jobs.start(1, |clip| if clip == "nothing" { None } else { until_cancelled() });
     assert!(jobs.is_running("a"));
 }
+
+#[test]
+fn the_queue_is_put_in_the_order_asked_and_runs_in_it() {
+    let mut jobs = Jobs::new("test", Preferred::Beside);
+    jobs.set_project("p");
+    for clip in ["short-old", "long-new", "short-new"] {
+        jobs.enqueue(clip, false);
+    }
+    let key = |clip: &str| match clip {
+        "long-new" => 0,
+        "short-new" => 1,
+        _ => 2,
+    };
+    jobs.order_queue(key);
+    let started = std::sync::Mutex::new(Vec::new());
+    jobs.start(1, |clip| {
+        started.lock().unwrap().push(clip.to_string());
+        done()
+    });
+    assert_eq!(*started.lock().unwrap(), ["long-new"], "one worker takes the first of the order");
+}

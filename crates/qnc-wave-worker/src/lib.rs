@@ -321,6 +321,10 @@ impl TimelineWaveService {
             return Ok(());
         };
         let mut after = None;
+        // The order of the clips (user 2026-11-19: "zadnji datum na kartici, najveći klipovi"):
+        // the latest day of shooting first, within a day the longest clip first (the statements
+        // are longer than the shots).
+        let mut order: std::collections::HashMap<String, (std::cmp::Reverse<String>, std::cmp::Reverse<u64>)> = std::collections::HashMap::new();
         loop {
             let page = context.content_reader.list_clips(after.clone())?;
             if page.is_empty() {
@@ -339,6 +343,7 @@ impl TimelineWaveService {
                 if self.jobs.is_ready(&clip.clip_id) {
                     continue;
                 }
+                order.insert(clip.clip_id.clone(), shooting_order(&clip.snapshot));
                 match context.content_reader.read_wave(&clip.clip_id)? {
                     Some(record) if wave_artifact_ready(&record) => {
                         self.jobs.mark_ready(&clip.clip_id);
@@ -353,6 +358,7 @@ impl TimelineWaveService {
             }
             after = Some(next_after);
         }
+        self.jobs.order_queue(|clip_id| order.get(clip_id).cloned());
         self.start_next();
         Ok(())
     }
@@ -967,6 +973,18 @@ fn check_stream_supported(
     .validate(decoder_config)
     .map(|_| ())
     .map_err(|error| error.to_string())
+}
+
+/// Where a clip goes in the waves' order: the day it was shot (its creation time's date; the
+/// latest first), then its length (the longest first).
+fn shooting_order(snapshot: &Snapshot) -> (std::cmp::Reverse<String>, std::cmp::Reverse<u64>) {
+    let original = &snapshot.metadata.original;
+    let day = original.tags.get("creation_time").map(|time| time.value.chars().take(10).collect()).unwrap_or_default();
+    let millis = original.duration_seconds.as_ref().map_or(0, |seconds| {
+        let rational = &seconds.value;
+        (rational.numerator.max(0) as u64).saturating_mul(1000) / (rational.denominator.max(1) as u64)
+    });
+    (std::cmp::Reverse(day), std::cmp::Reverse(millis))
 }
 
 /// The sample rate of the first sound stream the wave reads (its first channel is the first
