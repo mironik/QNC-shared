@@ -125,8 +125,8 @@ impl Store {
             tx.execute(
                 "INSERT INTO transcript_queue (clip_id, from_frame, to_frame, quality, state, error, took_ms, asked_at_utc)
                  VALUES (?1, ?2, ?3, ?4, 'waiting', '', 0, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-                 ON CONFLICT(clip_id) DO UPDATE SET from_frame=excluded.from_frame, to_frame=excluded.to_frame,
-                   quality=excluded.quality, state='waiting', error='', took_ms=0, asked_at_utc=excluded.asked_at_utc",
+                 ON CONFLICT(clip_id, from_frame, to_frame, quality) DO UPDATE SET
+                   state='waiting', error='', took_ms=0, asked_at_utc=excluded.asked_at_utc",
                 params![range.clip_id, range.from_frame as i64, range.to_frame as i64, quality_name(range.quality)],
             )
             .map_err(err)?;
@@ -402,17 +402,26 @@ fn state_name(state: QueueState) -> &'static str {
 }
 
 fn ensure_schema(conn: &Connection) -> Result<()> {
+    // A queue of one row a clip (audit 2026-11-19: a long clip queued in pieces kept only its last
+    // piece, a Croatian request wrote over Parakeet's) is dropped: its rows are requests, not
+    // results, and the clips not heard are queued again.
+    let one_row_a_clip: bool = object_exists(conn, "table", "transcript_queue")?
+        && conn.query_row("SELECT COUNT(*) FROM pragma_table_info('transcript_queue') WHERE pk > 0", [], |r| r.get::<_, i64>(0)).map_err(err)? == 1;
+    if one_row_a_clip {
+        conn.execute_batch("DROP VIEW IF EXISTS public_transcript_queue; DROP TABLE transcript_queue;").map_err(err)?;
+    }
     if !object_exists(conn, "table", "transcript_queue")? {
         conn.execute_batch(
             "CREATE TABLE transcript_queue (
-                clip_id TEXT PRIMARY KEY,
+                clip_id TEXT NOT NULL,
                 from_frame INTEGER NOT NULL CHECK (from_frame >= 0),
                 to_frame INTEGER NOT NULL CHECK (to_frame > from_frame),
                 quality TEXT NOT NULL CHECK (quality IN ('fast', 'best')),
                 state TEXT NOT NULL CHECK (state IN ('waiting', 'running', 'done', 'failed')),
                 error TEXT NOT NULL,
                 took_ms INTEGER NOT NULL DEFAULT 0,
-                asked_at_utc TEXT NOT NULL
+                asked_at_utc TEXT NOT NULL,
+                PRIMARY KEY (clip_id, from_frame, to_frame, quality)
             );",
         )
         .map_err(err)?;
