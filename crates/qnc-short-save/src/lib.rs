@@ -17,6 +17,8 @@ pub struct Saved {
     pub shot_id: String,
     pub clip_id: String,
     pub marks: (u64, u64),
+    /// A part added to the statement (its own stills stay; user 2026-11-19).
+    pub part: bool,
 }
 
 /// The save of one short at a time.
@@ -55,6 +57,14 @@ pub type OpenShort<'a> = (&'a str, &'a str, (u64, u64));
 
 /// The action of the Update button of an open statement.
 pub const UPDATE: &str = "statement_update";
+/// The shown clip's IN/OUT added as a part of the chosen statement (user 2026-11-19: "svaka
+/// izjava može postati složena"; grey while no statement is chosen).
+pub const ADD_PART: &str = "statement_add_part";
+
+/// Whether a part can be added: a statement chosen and an IN/OUT shown that is not its own.
+pub fn can_add_part(open: Option<OpenShort<'_>>, shown_clip: Option<&str>, marks: Option<(u64, u64)>) -> bool {
+    open.is_some_and(|(_, clip, saved)| shown_clip.is_some() && marks.is_some_and(|cut| cut.1 > cut.0 && !(Some(clip) == shown_clip && cut == saved)))
+}
 
 /// Whether the marks shown differ from the saved IN/OUT of the statement open on its clip.
 pub fn changed(open: Option<OpenShort<'_>>, shown_clip: Option<&str>, marks: Option<(u64, u64)>) -> bool {
@@ -93,7 +103,7 @@ impl ShortSave {
         let (target, clip_id) = (target.clone(), clip_id.to_string());
         let (sender, receiver) = mpsc::channel();
         let started = std::thread::Builder::new().name("qnc-short-trim".into()).spawn(move || {
-            let trimmed = qnc_virtual_shots::trim_short_now(&target, &shot, cut.0, cut.1).map(|_| Saved { shot_id: shot, clip_id, marks: cut });
+            let trimmed = qnc_virtual_shots::trim_short_now(&target, &shot, cut.0, cut.1).map(|_| Saved { shot_id: shot, clip_id, marks: cut, part: false });
             let _ = sender.send(trimmed);
         });
         if started.is_ok() {
@@ -103,6 +113,22 @@ impl ShortSave {
 
     /// Update of the open statement (user 2026-11-09): the IN/OUT its source timeline shows now
     /// become its IN/OUT, however they got there (keys, a drag).
+    /// Adds the shown clip's IN/OUT as a part of the chosen statement, in the background.
+    pub fn add_part(&mut self, open: Option<OpenShort<'_>>, shown_clip: Option<&str>, marks: Option<(u64, u64)>, target: Option<&ProjectDbTarget>) -> bool {
+        let (true, Some((shot, _, _)), Some(clip), Some(cut), Some(target), None) = (can_add_part(open, shown_clip, marks), open, shown_clip, marks, target, &self.pending) else { return true };
+        log(&format!("short-save part {shot} {clip} {cut:?}"));
+        let (target, shot, clip_id) = (target.clone(), shot.to_string(), clip.to_string());
+        let (sender, receiver) = mpsc::channel();
+        let started = std::thread::Builder::new().name("qnc-short-part".into()).spawn(move || {
+            let added = qnc_virtual_shots::add_part_now(&target, &shot, &clip_id, cut.0, cut.1).map(|_| Saved { shot_id: shot, clip_id, marks: cut, part: true });
+            let _ = sender.send(added);
+        });
+        if started.is_ok() {
+            self.pending = Some(receiver);
+        }
+        true
+    }
+
     pub fn update(&mut self, open: Option<OpenShort<'_>>, shown_clip: Option<&str>, marks: Option<(u64, u64)>, target: Option<&ProjectDbTarget>) -> bool {
         let (Some((shot, clip_id, _)), Some(cut), Some(target), None) = (open.filter(|open| changed(Some(*open), shown_clip, marks)), marks, target, &self.pending) else { return true };
         log(&format!("short-save update {shot} -> {cut:?}"));
@@ -110,7 +136,7 @@ impl ShortSave {
         let (target, shot, clip_id) = (target.clone(), shot.to_string(), clip_id.to_string());
         let (sender, receiver) = mpsc::channel();
         let started = std::thread::Builder::new().name("qnc-short-trim".into()).spawn(move || {
-            let trimmed = qnc_virtual_shots::trim_short_now(&target, &shot, cut.0, cut.1).map(|_| Saved { shot_id: shot, clip_id, marks: cut });
+            let trimmed = qnc_virtual_shots::trim_short_now(&target, &shot, cut.0, cut.1).map(|_| Saved { shot_id: shot, clip_id, marks: cut, part: false });
             let _ = sender.send(trimmed);
         });
         if started.is_ok() {
@@ -165,7 +191,7 @@ impl ShortSave {
                     if !caption_name.trim().is_empty() || !caption_role.trim().is_empty() {
                         qnc_virtual_shots::set_caption_now(&target, &shot.shot_id, &caption_name, &caption_role)?;
                     }
-                    Ok(Saved { shot_id: shot.shot_id, clip_id, marks: (in_frame, out_frame) })
+                    Ok(Saved { shot_id: shot.shot_id, clip_id, marks: (in_frame, out_frame), part: false })
                 });
                 let _ = sender.send(saved.map_err(|error| error.to_string()));
             })
@@ -231,7 +257,7 @@ impl ShortSave {
         let started = std::thread::Builder::new().name("qnc-short-overwrite".into()).spawn(move || {
             let (in_frame, out_frame) = asked.marks;
             let written = qnc_virtual_shots::trim_short_now(&asked.target, &asked.shot_id, in_frame, out_frame)
-                .map(|_| Saved { shot_id: asked.shot_id, clip_id: asked.clip_id, marks: asked.marks });
+                .map(|_| Saved { shot_id: asked.shot_id, clip_id: asked.clip_id, marks: asked.marks, part: false });
             let _ = sender.send(written);
         });
         if started.is_ok() {
