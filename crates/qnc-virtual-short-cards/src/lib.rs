@@ -45,6 +45,17 @@ pub fn chosen<'a>(cards: &'a [VirtualShortCard], shot_id: Option<&str>) -> Optio
     Some((card.shot_id.as_str(), card.clip_id.as_str(), (card.in_frame, card.out_frame)))
 }
 
+/// The parts of the chosen statement in the clip shown, its own IN/OUT first, while it has parts
+/// (user 2026-11-19: a compound statement lights all its parts in the transcript; from the
+/// statement's record, the text is the transcript's).
+pub fn chosen_parts(cards: &[VirtualShortCard], shot_id: Option<&str>, shown_clip: Option<&str>) -> Option<(String, Vec<(u64, u64)>)> {
+    let card = cards.iter().find(|card| Some(card.shot_id.as_str()) == shot_id && !card.b_roll && !card.parts.is_empty())?;
+    let shown = shown_clip?;
+    let own = (card.clip_id == shown).then_some((card.in_frame, card.out_frame));
+    let parts = card.parts.iter().filter(|part| part.clip_id == shown).map(|part| (part.in_frame, part.out_frame));
+    Some((shown.to_string(), own.into_iter().chain(parts).collect()))
+}
+
 /// The IN/OUT of the chosen statement while its clip is the one shown: the source timeline
 /// enlarges them (user 2026-11-09).
 pub fn shown_marks(cards: &[VirtualShortCard], shot_id: Option<&str>, shown_clip: Option<&str>) -> Option<(u64, u64)> {
