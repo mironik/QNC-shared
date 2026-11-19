@@ -11,7 +11,7 @@ fn main() {
     let codec = args.next().unwrap_or_else(|| "h264".into());
     let folder = args.next().map(std::path::PathBuf::from);
     let cancel = AtomicBool::new(false);
-    let pace = qnc_shot_analysis::Pace { player_plays: &|| false, wanted: &|| None, takes: &|_| true, cancel: &cancel };
+    let pace = qnc_shot_analysis::Pace { player_plays: &|| false, wanted: &|| None, takes: &|_| true, workers: &qnc_shot_analysis::most_workers, cancel: &cancel };
     let frames = qnc_shot_analysis::KeyPictures::open(&path).expect("index").expect("an index").frames;
     // The filmstrip's 13 places, spread over the clip.
     let targets: Vec<u64> = (0..13u64).map(|i| i * frames.saturating_sub(1) / 12).collect();

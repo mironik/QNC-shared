@@ -85,8 +85,19 @@ fn queued_clips_are_read_in_order_and_asking_a_clip_again_waits_it_again() {
     assert_eq!(queue.iter().map(|q| (q.clip_id.as_str(), q.state, q.quality)).collect::<Vec<_>>(), [("a", QueueState::Done, QueueQuality::Fast), ("b", QueueState::Failed, QueueQuality::Best)]);
     assert_eq!(queue[1].error, "no sound");
     enqueue(&target, vec![asked("b", QueueQuality::Fast)]).unwrap();
-    let again = read_queue(&target).unwrap().into_iter().find(|q| q.clip_id == "b").unwrap();
-    assert_eq!((again.state, again.quality, again.error.as_str()), (QueueState::Waiting, QueueQuality::Fast, ""));
+    let rows: Vec<_> = read_queue(&target).unwrap().into_iter().filter(|q| q.clip_id == "b").map(|q| (q.state, q.quality)).collect();
+    assert_eq!(rows, [(QueueState::Failed, QueueQuality::Best), (QueueState::Waiting, QueueQuality::Fast)], "a request of another engine is a row of its own");
+    enqueue(&target, vec![asked("b", QueueQuality::Best)]).unwrap();
+    let again = read_queue(&target).unwrap().into_iter().find(|q| q.clip_id == "b" && q.quality == QueueQuality::Best).unwrap();
+    assert_eq!((again.state, again.error.as_str()), (QueueState::Waiting, ""), "the same request asked again waits again");
+}
+
+#[test]
+fn every_piece_of_a_long_clip_is_a_row_of_its_own() {
+    let (_dir, target) = project();
+    let piece = |from: u64, to: u64| Queued { from_frame: from, to_frame: to, ..asked("long", QueueQuality::Fast) };
+    enqueue(&target, vec![piece(0, 3000), piece(3000, 6000), piece(6000, 9000)]).unwrap();
+    assert_eq!(read_queue(&target).unwrap().len(), 3, "audit 2026-11-19: only the last piece was kept");
 }
 
 /// A statement transcribed again (live 2026-11-08, Mironik 3609 992..1072): the old line
@@ -137,10 +148,12 @@ fn a_clip_asked_again_while_it_runs_is_not_marked_done_by_the_old_run() {
     let again = Queued { from_frame: 100, to_frame: 200, quality: QueueQuality::Best, ..first.clone() };
     enqueue(&target, vec![again.clone()]).unwrap();
     set_queued(&target, &first, QueueState::Done, "", 10).unwrap();
-    let entry = read_queue(&target).unwrap().into_iter().next().unwrap();
-    assert_eq!((entry.state, entry.from_frame, entry.quality), (QueueState::Waiting, 100, QueueQuality::Best), "the new request still waits");
+    let queue = read_queue(&target).unwrap();
+    let state = |quality| queue.iter().find(|q| q.quality == quality).map(|q| (q.state, q.from_frame));
+    assert_eq!(state(QueueQuality::Fast), Some((QueueState::Done, 0)), "the first run marks its own request");
+    assert_eq!(state(QueueQuality::Best), Some((QueueState::Waiting, 100)), "the new request still waits");
     set_queued(&target, &again, QueueState::Done, "", 10).unwrap();
-    assert_eq!(read_queue(&target).unwrap()[0].state, QueueState::Done);
+    assert!(read_queue(&target).unwrap().iter().all(|q| q.state == QueueState::Done));
 }
 
 #[test]
@@ -245,4 +258,17 @@ fn a_fast_transcript_made_later_never_says_over_a_fine_one() {
     save(&target, transcript(100, 200, "opet brzo")).unwrap();
     let said: Vec<String> = read_clip(&target, "c1").unwrap().iter().flat_map(|t| t.lines.iter().map(|l| l.text.clone())).collect();
     assert!(said.contains(&"fino".to_string()) && !said.contains(&"opet brzo".to_string()), "{said:?}");
+}
+
+#[test]
+fn the_fine_words_correct_the_rough_ones_and_keep_their_sentences() {
+    let w = |text: &str, from: u64, to: u64| Word { from, to, text: text.into() };
+    let line = |words: Vec<Word>| Line { from: words[0].from, to: words.last().unwrap().to, text: words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" "), words };
+    // Parakeet: sentences, capitals, punctuation; one wrong word and one missed.
+    let rough = [line(vec![w("Kad", 0, 10), w("je", 10, 20), w("jedna,", 20, 40)]), line(vec![w("Zagreb", 50, 70), w("promocija.", 80, 100)])];
+    // The Croatian model: lower case, no punctuation, the right words, the missed "bila".
+    let fine = [line(vec![w("kad", 0, 10), w("je", 10, 20), w("1969.", 21, 39), w("zagreb", 50, 70), w("bila", 71, 79), w("promocija", 80, 100)])];
+    let lines = corrected(&rough, &fine);
+    let said: Vec<&str> = lines.iter().map(|line| line.text.as_str()).collect();
+    assert_eq!(said, ["Kad je 1969.,", "Zagreb bila promocija."]);
 }

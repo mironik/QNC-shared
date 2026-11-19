@@ -176,6 +176,12 @@ fn run(ffmpeg: &Path, clip: &VoiceClip<'_>, card: &Path, out: &Path) -> Result<(
     let frames = frames(clip.seconds, clip.fps);
     let length = format!("{:.6}", frames as f64 / clip.fps);
     let mut command = Command::new(ffmpeg);
+    // No console window over the form.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
     command.args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y"]);
     match clip.sequence {
         Some(pattern) => command.args(["-start_number", "1", "-framerate", &rate]).arg("-i").arg(pattern),

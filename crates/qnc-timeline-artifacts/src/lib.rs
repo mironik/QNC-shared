@@ -60,6 +60,12 @@ impl Artifacts {
         Self::default()
     }
 
+    /// Hands the first camera channel of every wave read to `sink` (the statements'
+    /// transcription; see `qnc_wave_worker::TimelineWaveService::set_first_channel`).
+    pub fn set_first_channel(&mut self, sink: Option<qnc_wave_worker::FirstChannelSink>) {
+        self.wave.set_first_channel(sink);
+    }
+
     /// Forget everything of the previous project.
     pub fn reset(&mut self) {
         self.filmstrip.reset();
