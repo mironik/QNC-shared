@@ -56,19 +56,11 @@ pub fn chosen_parts(cards: &[VirtualShortCard], shot_id: Option<&str>, shown_cli
     Some((shown.to_string(), own.into_iter().chain(parts).collect()))
 }
 
-/// What a statement shows on the source timeline: its IN/OUT, or with several parts from its
-/// first IN to its last OUT in its clip, so every part of it is seen (user 2026-11-19: a compound
-/// statement is a statement with more IN/OUT in the database).
-pub fn span(card: &VirtualShortCard) -> (u64, u64) {
-    let parts = card.parts.iter().filter(|part| part.clip_id == card.clip_id).map(|part| (part.in_frame, part.out_frame));
-    std::iter::once((card.in_frame, card.out_frame)).chain(parts).fold((card.in_frame, card.out_frame), |(from, to), (a, b)| (from.min(a), to.max(b)))
-}
-
-/// The IN/OUT of the chosen statement while its clip is the one shown (its span when it has
-/// several parts): the source timeline enlarges them (user 2026-11-09).
+/// The IN/OUT of the chosen statement while its clip is the one shown: the source timeline
+/// enlarges them (user 2026-11-09).
 pub fn shown_marks(cards: &[VirtualShortCard], shot_id: Option<&str>, shown_clip: Option<&str>) -> Option<(u64, u64)> {
     let card = cards.iter().find(|card| Some(card.shot_id.as_str()) == shot_id && !card.b_roll && Some(card.clip_id.as_str()) == shown_clip)?;
-    Some(span(card))
+    Some((card.in_frame, card.out_frame))
 }
 
 /// The card of `shot_id` to open, or the text code of why it cannot be: it is gone or its clip
