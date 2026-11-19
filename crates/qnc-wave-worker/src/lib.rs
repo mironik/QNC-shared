@@ -189,6 +189,19 @@ impl WaveContext {
     }
 }
 
+/// The first camera channel of a clip as its wave read it, from the medium's start (user
+/// 2026-11-19: the statements' transcription hears it without reading the medium again).
+pub struct FirstChannel {
+    pub clip_id: String,
+    /// Samples per second of `samples`.
+    pub rate: u32,
+    /// Mono, -1..1.
+    pub samples: Vec<f32>,
+}
+
+/// Who takes a clip's [`FirstChannel`] once its wave is made (on the wave's own thread).
+pub type FirstChannelSink = Arc<dyn Fn(FirstChannel) + Send + Sync>;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WaveRequest {
     pub project_id: String,
@@ -232,6 +245,8 @@ pub struct TimelineWaveService {
     publisher: Option<Box<dyn WaveContentWrite>>,
     /// How many passes read at once, found by one short test of the medium (user 2026-10-18).
     readers: Readers,
+    /// Who takes the first camera channel of every wave read (the statements' transcription).
+    first_channel: Option<FirstChannelSink>,
 }
 
 impl Default for TimelineWaveService {
@@ -242,6 +257,7 @@ impl Default for TimelineWaveService {
             coarse: BTreeSet::new(),
             publisher: None,
             readers: Readers::default(),
+            first_channel: None,
         }
     }
 }
@@ -261,6 +277,12 @@ impl fmt::Debug for TimelineWaveService {
 }
 
 impl TimelineWaveService {
+    /// Hands the first camera channel of every wave read from now on to `sink`, once a clip's
+    /// wave is made (user 2026-11-19: "val i prijepis zajedno", the sound read once).
+    pub fn set_first_channel(&mut self, sink: Option<FirstChannelSink>) {
+        self.first_channel = sink;
+    }
+
     pub fn configure(&mut self, context: WaveContext) {
         if self.jobs.set_project(context.project_id()) {
             self.coarse.clear();
@@ -481,7 +503,9 @@ impl TimelineWaveService {
         let readers = self.readers.try_lock().ok().and_then(|readers| *readers).unwrap_or(1);
         let shared_readers = self.readers.clone();
         let coarse = &self.coarse;
+        let sink = self.first_channel.clone();
         self.jobs.start(readers, |clip_id| {
+            let sink = sink.clone();
             let request = WaveRequest { project_id: context.project_id().to_string(), clip_id: clip_id.to_string() };
             let context = context.clone();
             let readers = shared_readers.clone();
@@ -490,7 +514,7 @@ impl TimelineWaveService {
             // over, read again before its own write had landed).
             let coarse_made = coarse.contains(clip_id);
             Some(Box::new(move |cancel: Arc<AtomicBool>| {
-                build_timeline_wave(&request, &context, &readers, coarse_made, &cancel)
+                build_timeline_wave(&request, &context, &readers, coarse_made, sink.as_ref(), &cancel)
             }))
         });
     }
@@ -544,6 +568,7 @@ fn build_timeline_wave(
     context: &WaveContext,
     readers: &Readers,
     _coarse_made: bool,
+    sink: Option<&FirstChannelSink>,
     cancel: &AtomicBool,
 ) -> Result<GeneratedWave, String> {
     if cancel.load(Ordering::Acquire) {
@@ -580,10 +605,17 @@ fn build_timeline_wave(
     // The filmstrip reads its own pictures before the waves (user 2026-10-18: up to 10 s a
     // clip is read through, a longer one gives the intra picture nearest each of 13 places),
     // so the pass reads only the sound.
-    let (lanes, coarse) = match coarse_first.then(|| decode_wave(&plan, media, source, true, cancel)).transpose()?.flatten() {
+    let mut first = sink.map(|_| Vec::new());
+    let (lanes, coarse) = match coarse_first.then(|| decode_wave(&plan, media, source, true, None, cancel)).transpose()?.flatten() {
         Some(lanes) => (lanes, true),
-        None => (decode_wave(&plan, media, source, false, cancel)?.ok_or("wave: no full wave")?, false),
+        None => (decode_wave(&plan, media, source, false, first.as_mut(), cancel)?.ok_or("wave: no full wave")?, false),
     };
+    if let (Some(sink), Some(samples)) = (sink, first.filter(|samples| !samples.is_empty())) {
+        let rate = first_stream_rate(media, &plan);
+        if let Some(rate) = rate {
+            sink(FirstChannel { clip_id: request.clip_id.clone(), rate, samples });
+        }
+    }
     let has_a2 = lanes.iter().any(|(lane, ..)| *lane == WaveLane::A2);
     let warning = (!has_a2).then(|| qnc_ui_text::text("wave.source_a2_audio_channel").to_string());
     let mut lane_peaks = Vec::new();
@@ -657,6 +689,7 @@ fn decode_wave(
     media: &MediaRepresentation,
     source: &WaveSourceBinding,
     coarse: bool,
+    mut first: Option<&mut Vec<f32>>,
     cancel: &AtomicBool,
 ) -> Result<Option<Vec<(WaveLane, Vec<f32>, Option<qnc_loudness::ChannelLoudness>)>>, String> {
     let streams = plan
@@ -692,6 +725,9 @@ fn decode_wave(
             buffer.clear();
         }
         for frame in samples.chunks_exact(channels) {
+            if let Some(first) = first.as_deref_mut() {
+                first.push(frame[0]);
+            }
             let mut at = 0;
             for (buffer, (count, _)) in bytes.iter_mut().zip(&parts) {
                 for sample in &frame[at..at + count] {
@@ -931,6 +967,16 @@ fn check_stream_supported(
     .validate(decoder_config)
     .map(|_| ())
     .map_err(|error| error.to_string())
+}
+
+/// The sample rate of the first sound stream the wave reads (its first channel is the first
+/// camera channel).
+fn first_stream_rate(media: &MediaRepresentation, plan: &WavePlan) -> Option<u32> {
+    let first = plan.channels.iter().map(|channel| channel.stream_index).min()?;
+    media.streams.iter().find(|stream| stream.index.as_ref().is_some_and(|index| index.value == first)).and_then(|stream| match &stream.details {
+        StreamDetails::Audio(audio) => audio.sample_rate_hz.as_ref().map(|rate| rate.value),
+        _ => None,
+    })
 }
 
 fn audio_stream_channels(media: &MediaRepresentation, stream_index: u32) -> Result<usize, String> {
