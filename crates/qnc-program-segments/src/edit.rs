@@ -189,12 +189,7 @@ impl ProgramSegments {
                 placements[0].curve = self.source.curves[index].clone();
             }
             let axis = qnc_program_view::ZoomAxis { cut, holds: (cut, cut), half, total: self.source.duration_frames, position, follow: &self.zoom_follow, lanes };
-            let mut sound = axis.sound();
-            // An enlarged statement: the zoom holds the range its timeline shows, the playhead moves in it.
-            if let Some((from, to)) = self.source.statement_window.filter(|(from, to)| from < to) {
-                (sound.from, sound.to) = (from, to);
-            }
-            return Some(qnc_program_view::ZoomSound { lane_choices: self.source.lane_choices, level_curves, ..sound });
+            return Some(qnc_program_view::ZoomSound { lane_choices: self.source.lane_choices, level_curves, ..axis.sound() });
         }
         if let Some(zoom) = self.clip_edge_zoom(view) {
             return Some(zoom);
