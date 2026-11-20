@@ -106,6 +106,10 @@ pub fn show(ctx: &egui::Context, segments: &SegmentsView, theme: &TimelineTheme)
                     let only_picture = sound.is_some_and(|sound| sound.picture_taken);
                     paint_strip(ui, rect, strip, in_focus && !only_picture, ui.rect_contains_pointer(rect), theme);
                 }
+                if response.clicked() || response.secondary_clicked() {
+                    // Which picture was clicked and what it gives (live 2026-11-20: a click on OUT did nothing).
+                    qnc_dev_diagnostics::log_line(qnc_dev_diagnostics::DiagnosticsStream::Player, format!("zoom-picture click index={index} label={:?} on_strip={on_strip} left={} action={:?}", still.label, response.clicked(), still.click.as_ref().map(|click| (&click.action, click.value))));
+                }
                 if response.clicked() {
                     if let Some(pick) = if on_strip { strip_pick } else { picture_pick } {
                         turned = Some(pick);
