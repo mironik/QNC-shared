@@ -99,11 +99,11 @@ impl ProgramSegments {
 mod tests {
     use super::*;
 
-    /// Locked (user 2026-10-21): the slot is 70 % of the enlarged window, each neighbour 15 %.
+    /// The slot and one filmstrip picture of 13 on each side (user 2026-11-20; was 70/15/15).
     #[test]
-    fn the_slot_takes_seventy_percent_and_each_neighbour_fifteen() {
-        assert_eq!(window(700, 1400, 5000), (550, 1550), "700 frames: 150 on each side");
-        assert_eq!(window(0, 700, 5000), (0, 850), "the program starts at the slot");
-        assert_eq!(window(4300, 5000, 5000), (4150, 5000), "the program ends at the slot");
+    fn the_slot_has_one_filmstrip_picture_on_each_side() {
+        assert_eq!(window(700, 1400, 5000), (636, 1464), "700 frames: 64 on each side");
+        assert_eq!(window(0, 700, 5000), (0, 764), "the program starts at the slot");
+        assert_eq!(window(4300, 5000, 5000), (4236, 5000), "the program ends at the slot");
     }
 }

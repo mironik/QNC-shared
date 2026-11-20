@@ -569,7 +569,7 @@ fn in_an_s_story_the_slot_tools_make_the_clip_and_the_story_longer_or_shorter() 
     segments.apply_action("clear_focus");
     // A double click enlarges the clip's slot, as a cover's.
     segments.apply(SegmentCommand::Zoom { slot: None, frame: Some(70) });
-    assert_eq!(segments.view().zoom, Some((39, 114)), "53 frames: 11 on each side");
+    assert_eq!(segments.view().zoom, Some((45, 108)), "53 frames: 5 on each side");
     segments.apply(SegmentCommand::Zoom { slot: None, frame: Some(70) });
     // A right click on a cut takes the edge of the clip on the clicked side (user 2026-11-01):
     // the IN of the first clip at the story's start, the OUT of the last at its end.

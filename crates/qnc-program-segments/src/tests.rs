@@ -1086,9 +1086,9 @@ fn a_double_click_enlarges_a_cover_with_its_neighbours_else_the_segment_and_the_
     // User 2026-10-24: a cover with part of the slots before and after, a segment alone, the program whole.
     let mut segments = component();
     segments.apply(SegmentCommand::Zoom { slot: Some("S|m1".into()), frame: Some(5) });
-    assert_eq!(segments.view().zoom, Some((0, 18)), "the covered slot S-m1 and 15 % beside it");
+    assert_eq!(segments.view().zoom, Some((0, 16)), "the covered slot S-m1 and a filmstrip picture beside it");
     segments.apply(SegmentCommand::Zoom { slot: Some("m1|m2".into()), frame: Some(20) });
-    assert_eq!(segments.view().zoom, Some((6, 34)), "no cover there: segment b in edit mode, 15 % beside it");
+    assert_eq!(segments.view().zoom, Some((8, 32)), "no cover there: segment b in edit mode, a filmstrip picture beside it");
     segments.apply(SegmentCommand::ProgramZoom);
     assert_eq!(segments.view().zoom, Some((0, 40)));
     segments.apply(SegmentCommand::ProgramZoom);
@@ -1360,25 +1360,28 @@ fn the_sound_assistants_proposal_is_kept_only_while_it_is_on_and_proposes() {
     assert_eq!(segments.view().message, qnc_ui_text::text("story.msg.sound_assist_keep_none"), "no waves read: nothing proposed");
 }
 
+/// User 2026-11-20: a statement's zoom is three windows, its IN picture, the player (the picture
+/// at the playhead) and its OUT picture; the taken edge is the cut.
 #[test]
-fn a_statement_enlarged_has_four_pictures_and_only_the_taken_edge_is_the_cut() {
+fn a_statements_zoom_is_its_in_the_player_and_its_out_and_the_taken_edge_is_the_cut() {
     let mut segments = component();
     let frames = |segments: &ProgramSegments| segments.view().source_edit_stills.iter().map(|still| (still.picture.as_ref().map(|p| p.source_frame), still.cut)).collect::<Vec<_>>();
     segments.set_source(marked(10).with_statement(true).with_taken(Some(true)));
-    assert_eq!(frames(&segments), [(Some(9), false), (Some(10), true), (Some(59), false), (None, false)].into_iter().filter(|(frame, _)| frame.is_some()).collect::<Vec<_>>(), "OUT at the clip's end has nothing after it");
+    assert_eq!(frames(&segments), [(Some(10), true), (Some(10), false), (Some(59), false)], "no player frame yet: the player shows the taken IN");
     let mut pick = marked(10).with_statement(true).with_taken(Some(false));
     pick.marks = Some((10, 40));
     segments.set_source(pick);
-    assert_eq!(frames(&segments), [(Some(9), false), (Some(10), false), (Some(39), true), (Some(40), false)]);
+    assert_eq!(frames(&segments), [(Some(10), false), (Some(39), false), (Some(39), true)]);
 }
 
+/// User 2026-11-20: a click on the IN picture puts the playhead on IN, on the OUT picture on OUT.
 #[test]
-fn a_click_on_a_picture_of_a_statements_zoom_takes_its_edge() {
+fn a_click_on_the_in_or_out_picture_of_a_statements_zoom_puts_the_playhead_there() {
     let mut segments = component();
     let mut pick = marked(10).with_statement(true).with_taken(Some(true));
     pick.marks = Some((10, 40));
     segments.set_source(pick);
-    let clicks: Vec<_> = segments.view().source_edit_stills.iter().map(|still| still.click.as_ref().map(|click| click.action.clone())).collect();
-    let (edge_in, edge_out) = (Some("select_mark_in".to_string()), Some("select_mark_out".to_string()));
-    assert_eq!(clicks, [edge_in.clone(), edge_in, edge_out.clone(), edge_out]);
+    let clicks: Vec<_> = segments.view().source_edit_stills.iter().map(|still| still.click.as_ref().map(|click| (click.action.clone(), click.value))).collect();
+    let cue = |frame: i64| Some(("timeline_cue_frame".to_string(), Some(frame)));
+    assert_eq!(clicks, [cue(10), None, cue(39)]);
 }

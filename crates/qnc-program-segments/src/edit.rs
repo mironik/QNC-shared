@@ -132,17 +132,20 @@ impl ProgramSegments {
         if !self.source.statement {
             return if taken { in_cut.stills() } else { out_cut.stills() };
         }
-        // A statement enlarged (user 2026-11-09): its four pictures, the last before it, its
-        // first, its last and the first after it; only the taken edge is the cut.
-        let (mut first, mut second) = (in_cut.stills(), out_cut.stills());
-        let other = if taken { &mut second } else { &mut first };
-        other.iter_mut().for_each(|still| still.cut = false);
-        // A click on a picture takes its edge, as Ctrl+I or Ctrl+O (user 2026-11-09).
-        let click = |action: &str| Some(qnc_program_view::StillAction::new(action, None, None));
-        first.iter_mut().for_each(|still| still.click = click("select_mark_in"));
-        second.iter_mut().for_each(|still| still.click = click("select_mark_out"));
-        first.append(&mut second);
-        first
+        // A statement (user 2026-11-20): three windows, its IN picture, the player (the picture
+        // at the playhead) and its OUT picture; a click on IN or OUT puts the playhead there.
+        // The taken edge is the cut (its line in the sound); I or O moves it to the playhead.
+        let cue = |frame: u64| Some(qnc_program_view::StillAction::new("timeline_cue_frame", None, Some(frame)));
+        let last = out_frame.saturating_sub(1).max(in_frame);
+        let playhead = self.source.playing.filter(|(program, _, _)| !program).map_or(if taken { in_frame } else { last }, |(_, frame, _)| frame);
+        let mut in_still = qnc_program_view::EditStill::new(in_frame, true, picture(in_frame)).labelled(&qnc_ui_text::text("story.still.in_first"));
+        in_still.click = cue(in_frame);
+        in_still.cut = taken;
+        let player = qnc_program_view::EditStill::new(playhead, true, picture(playhead)).labelled(&qnc_ui_text::text("zoom.player"));
+        let mut out_still = qnc_program_view::EditStill::new(out_frame, false, picture(last)).labelled(&qnc_ui_text::text("story.still.out_last"));
+        out_still.click = cue(last);
+        out_still.cut = !taken;
+        vec![in_still, player, out_still]
     }
 
     /// The sound around the cut of the trim zoom (user 2026-10-25: "zoom the audio so the
@@ -156,7 +159,9 @@ impl ProgramSegments {
             let clip_id = self.source.clip_id.clone()?;
             let (num, den) = self.source.timebase?;
             let half = second((num.max(0) as u64, den.max(1) as u64));
-            let position = self.source.playing.filter(|(program, _, _)| !program).map(|(_, frame, playing)| (frame, playing));
+            // The zoom is always around the playhead (user 2026-11-20: it stands in the middle,
+            // the sound and the pictures move under it; the taken mark stays until Save).
+            let position = self.source.playing.filter(|(program, _, _)| !program).map(|(_, frame, _)| (frame, true));
             // The whole clip, so a played window can read its sound ahead.
             let length = self.source.duration_frames.max(cut + 1);
             let lane = |lane: &qnc_lane_choice::Lane| qnc_program_waveform::Placement {

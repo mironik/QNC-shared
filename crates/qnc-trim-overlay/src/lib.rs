@@ -41,7 +41,7 @@ const LABEL_SIZE: Vec2 = Vec2::new(30.0, 20.0);
 const BUTTONS_HEIGHT: f32 = 30.0;
 const BUTTON_SIZE: Vec2 = Vec2::new(78.0, 24.0);
 /// Save keeps what is taken (user 2026-11-04: "after Save do not close"); Close is Escape.
-const BUTTONS: [(&str, &str); 3] = [("story.ui.undo", qnc_edit_verbs::UNDO), ("common.save", qnc_edit_verbs::SAVE), ("zoom.close", qnc_edit_verbs::DROP)];
+const BUTTONS: [(&str, &str); 3] = [("zoom.cancel", qnc_edit_verbs::UNDO), ("common.save", qnc_edit_verbs::SAVE), ("zoom.close", qnc_edit_verbs::DROP)];
 /// The share of the screen width the window may take.
 const SCREEN_SHARE: f32 = 0.92;
 
