@@ -126,6 +126,9 @@ pub struct ZoomSound {
     pub from: u64,
     pub to: u64,
     pub cut: u64,
+    /// The IN and OUT of the clip on this axis (user 2026-11-20: the zoom greys what is before IN
+    /// and after OUT, as the timeline does); `None`: nothing greyed.
+    pub marks: Option<(u64, u64)>,
     pub lanes: [Vec<qnc_program_waveform::Placement>; 2],
     pub peaks: [Vec<u16>; 2],
     /// The words said on A1 in the window (user 2026-10-26: the start or end of a statement

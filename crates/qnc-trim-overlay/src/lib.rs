@@ -273,6 +273,18 @@ fn paint_sound(ui: &mut egui::Ui, area: Rect, sound: &ZoomSound, gap_at: Option<
             }
         }
     }
+    // Before IN and after OUT lightly greyed, as on the timeline (user 2026-11-20: the zoom is an
+    // enlarged part of the timeline).
+    if let Some((in_frame, out_frame)) = sound.marks {
+        let grey = Color32::from_black_alpha(110);
+        let (left, right) = (x_of(in_frame.max(sound.from)).min(area.right()), x_of(out_frame.min(sound.to).max(sound.from)).max(area.left()));
+        if in_frame > sound.from {
+            ui.painter().rect_filled(Rect::from_min_max(area.min, egui::pos2(left, area.bottom())), 0.0, grey);
+        }
+        if out_frame < sound.to {
+            ui.painter().rect_filled(Rect::from_min_max(egui::pos2(right, area.top()), area.max), 0.0, grey);
+        }
+    }
     // One thin line from between the pictures down through both waves when the cut is there.
     let from_top = match gap_at {
         Some(x) if (x - cut_x).abs() < 2.0 => pictures_top - 4.0,

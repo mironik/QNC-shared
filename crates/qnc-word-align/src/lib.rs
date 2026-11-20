@@ -131,10 +131,10 @@ pub fn align_kept(from: u64, to: u64, peaks: &[u16], words: &[Span], kept: &[boo
             }
         } else {
             let mut span = word;
-            if let Some(run) = runs.iter().find(|run| run.to + 1 >= span.from && run.to <= span.from + 1 && run.from >= before) {
+            if let Some(run) = runs.iter().find(|run| run.to + MAX_DIP >= span.from && run.to <= span.from && run.from >= before) {
                 span.from = run.from;
             }
-            if let Some(run) = runs.iter().find(|run| run.from <= span.to + 1 && run.from + 1 >= span.to && run.to <= after) {
+            if let Some(run) = runs.iter().find(|run| run.from <= span.to + MAX_DIP && run.from >= span.to && run.to <= after) {
                 span.to = run.to;
             }
             aligned[index] = span;

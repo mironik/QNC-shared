@@ -189,7 +189,7 @@ impl ProgramSegments {
                 placements[0].curve = self.source.curves[index].clone();
             }
             let axis = qnc_program_view::ZoomAxis { cut, holds: (cut, cut), half, total: self.source.duration_frames, position, follow: &self.zoom_follow, lanes };
-            return Some(qnc_program_view::ZoomSound { lane_choices: self.source.lane_choices, level_curves, ..axis.sound() });
+            return Some(qnc_program_view::ZoomSound { lane_choices: self.source.lane_choices, level_curves, marks: self.source.marks, ..axis.sound() });
         }
         if let Some(zoom) = self.clip_edge_zoom(view) {
             return Some(zoom);
