@@ -70,7 +70,14 @@ pub fn show_option(ctx: &egui::Context, theme: &qnc_desktop_theme::Theme, choice
                         if index == 0 && !opened {
                             response.request_focus();
                         }
+                        // The first letter of a field is a capital (user 2026-11-20: an auto-function).
+                        if response.changed() {
+                            values[index] = capital_first(&values[index]);
+                        }
                         if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                            // This Enter is the field's; the next field, drawn after it in this
+                            // frame, must not see it too (it would leave at once and save).
+                            ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
                             match index + 1 < choice.fields.len() {
                                 true => ui.ctx().memory_mut(|memory| memory.request_focus(egui::Id::new(("qnc_choice_box_field", index + 1)))),
                                 false => entered = true,
@@ -110,4 +117,24 @@ pub fn show_option(ctx: &egui::Context, theme: &qnc_desktop_theme::Theme, choice
         ctx.memory_mut(|memory| memory.data.insert_temp(egui::Id::new("qnc_choice_box_opened"), false));
     }
     chosen
+}
+
+/// The text with its first letter a capital; the rest as written.
+fn capital_first(value: &str) -> String {
+    let mut chars = value.chars();
+    match chars.next() {
+        Some(first) if first.is_lowercase() => first.to_uppercase().chain(chars).collect(),
+        _ => value.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod capital_tests {
+    #[test]
+    fn the_first_letter_becomes_a_capital_the_rest_stays() {
+        assert_eq!(super::capital_first("ivan kaštelan"), "Ivan kaštelan");
+        assert_eq!(super::capital_first("šef"), "Šef");
+        assert_eq!(super::capital_first("Ana"), "Ana");
+        assert_eq!(super::capital_first(""), "");
+    }
 }
