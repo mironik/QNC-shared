@@ -51,7 +51,9 @@ impl Store {
                 clip_name,
                 in_frame,
                 out_frame,
-            } => self.save_short(project_id, clip_id, clip_name, *in_frame, *out_frame),
+                tc_in,
+                tc_out,
+            } => self.save_short(project_id, clip_id, clip_name, *in_frame, *out_frame, (tc_in, tc_out)),
             Operation::CreateCoverShot {
                 project_id,
                 clip_id,
@@ -68,7 +70,7 @@ impl Store {
             Operation::ForgetUnconfirmedCoverShots { older_than_seconds } => {
                 self.forget_unconfirmed_cover_shots(*older_than_seconds)
             }
-            Operation::TrimShort { shot_id, in_frame, out_frame } => self.trim_short(shot_id, *in_frame, *out_frame),
+            Operation::TrimShort { shot_id, in_frame, out_frame, tc_in, tc_out } => self.trim_short(shot_id, *in_frame, *out_frame, (tc_in, tc_out)),
             Operation::ListShorts => self.list_shorts(),
             Operation::ListBroll => self.list_b_roll(),
             Operation::MarkShortStills {
@@ -94,6 +96,7 @@ impl Store {
         clip_name: &str,
         in_frame: u64,
         out_frame: u64,
+        (tc_in, tc_out): (&str, &str),
     ) -> Result<Data> {
         if project_id.trim().is_empty() {
             return Err(qnc_ui_text::text("story.msg.no_active_project").into());
@@ -129,8 +132,8 @@ impl Store {
         tx.execute(
             "INSERT INTO virtual_shots (
                 shot_id, clip_id, class, in_frame, out_frame, source_shot_id, name,
-                created_at_utc, still_status
-             ) VALUES (?1, ?2, 'short', ?3, ?4, ?5, ?6, ?7, 'pending')",
+                created_at_utc, still_status, tc_in, tc_out
+             ) VALUES (?1, ?2, 'short', ?3, ?4, ?5, ?6, ?7, 'pending', ?8, ?9)",
             params![
                 shot_id,
                 clip_id,
@@ -138,7 +141,9 @@ impl Store {
                 out_frame as i64,
                 source_shot_id,
                 name,
-                created
+                created,
+                tc_in,
+                tc_out
             ],
         )
         .map_err(err)?;
@@ -264,7 +269,7 @@ impl Store {
     }
     /// New IN/OUT of a SubClip (class `short`): OUT after IN, both within its clip as the
     /// catalog has it; its stills are pending again (they showed the old cut).
-    fn trim_short(&mut self, shot_id: &str, in_frame: u64, out_frame: u64) -> Result<Data> {
+    fn trim_short(&mut self, shot_id: &str, in_frame: u64, out_frame: u64, (tc_in, tc_out): (&str, &str)) -> Result<Data> {
         if out_frame <= in_frame {
             return Err(qnc_ui_text::text("story.out_after_in").into());
         }
@@ -282,9 +287,9 @@ impl Store {
         }
         self.conn
             .execute(
-                "UPDATE virtual_shots SET in_frame = ?2, out_frame = ?3, still_status = 'pending', still_error = NULL
+                "UPDATE virtual_shots SET in_frame = ?2, out_frame = ?3, tc_in = ?4, tc_out = ?5, still_status = 'pending', still_error = NULL
                  WHERE shot_id = ?1 AND class = 'short'",
-                params![shot_id, in_frame as i64, out_frame as i64],
+                params![shot_id, in_frame as i64, out_frame as i64, tc_in, tc_out],
             )
             .map_err(err)?;
         Ok(Data::Changed)

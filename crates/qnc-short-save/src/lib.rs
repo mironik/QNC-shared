@@ -29,6 +29,9 @@ pub struct ShortSave {
     written: Option<(String, (u64, u64))>,
     /// The same statement is already there: Overwrite or Cancel is asked (user 2026-11-01).
     asked: Option<Asked>,
+    /// The clip shown and its camera timecode: IN and OUT are written as timecode too (user
+    /// 2026-11-20: "time kod je jedino mjerilo"; the frames stay for the player).
+    timecode: Option<(String, qnc_source_timecode::SourceTimecode)>,
 }
 
 /// The catalog actions of the question "the same statement is already there".
@@ -66,9 +69,18 @@ impl ShortSave {
     /// mark is let go (Enter, a click) a cut other than the saved one is written as its new
     /// IN/OUT, and the outcome is given like a save's (this is `poll` too). New marks set
     /// with I and O without taking one stay a new SubClip (Add SubClip).
-    pub fn follow(&mut self, open: Option<OpenShort<'_>>, shown_clip: Option<&str>, marks: Option<(u64, u64)>, taken: bool, target: Option<&ProjectDbTarget>) -> Option<Result<Saved, String>> {
+    pub fn follow(&mut self, open: Option<OpenShort<'_>>, shown_clip: Option<&str>, marks: Option<(u64, u64)>, taken: bool, target: Option<&ProjectDbTarget>, timecode: Option<&qnc_source_timecode::SourceTimecode>) -> Option<Result<Saved, String>> {
+        self.timecode = shown_clip.zip(timecode).map(|(clip, timecode)| (clip.to_string(), *timecode));
         self.tune(open, shown_clip, marks, taken, target);
         self.poll()
+    }
+
+    /// IN and OUT of `clip` as its camera timecode; empty while its timecode is not known.
+    fn labels(&self, clip: &str, (in_frame, out_frame): (u64, u64)) -> (String, String) {
+        match &self.timecode {
+            Some((shown, timecode)) if shown == clip && timecode.start_frame.is_some() => (timecode.label(in_frame), timecode.label(out_frame)),
+            _ => (String::new(), String::new()),
+        }
     }
 
     fn tune(&mut self, open: Option<OpenShort<'_>>, shown_clip: Option<&str>, marks: Option<(u64, u64)>, taken: bool, target: Option<&ProjectDbTarget>) {
@@ -85,10 +97,11 @@ impl ShortSave {
         }
         log(&format!("short-save fine tuning {shot} {saved:?} -> {cut:?}"));
         self.written = Some((shot.clone(), cut));
+        let (tc_in, tc_out) = self.labels(clip_id, cut);
         let (target, clip_id) = (target.clone(), clip_id.to_string());
         let (sender, receiver) = mpsc::channel();
         let started = std::thread::Builder::new().name("qnc-short-trim".into()).spawn(move || {
-            let trimmed = qnc_virtual_shots::trim_short_now(&target, &shot, cut.0, cut.1).map(|_| Saved { shot_id: shot, clip_id, marks: cut });
+            let trimmed = qnc_virtual_shots::trim_short_now(&target, &shot, cut.0, cut.1, (&tc_in, &tc_out)).map(|_| Saved { shot_id: shot, clip_id, marks: cut });
             let _ = sender.send(trimmed);
         });
         if started.is_ok() {
@@ -102,10 +115,11 @@ impl ShortSave {
         let (Some((shot, clip_id, _)), Some(cut), Some(target), None) = (open.filter(|open| changed(Some(*open), shown_clip, marks)), marks, target, &self.pending) else { return true };
         log(&format!("short-save update {shot} -> {cut:?}"));
         self.written = Some((shot.to_string(), cut));
+        let (tc_in, tc_out) = self.labels(clip_id, cut);
         let (target, shot, clip_id) = (target.clone(), shot.to_string(), clip_id.to_string());
         let (sender, receiver) = mpsc::channel();
         let started = std::thread::Builder::new().name("qnc-short-trim".into()).spawn(move || {
-            let trimmed = qnc_virtual_shots::trim_short_now(&target, &shot, cut.0, cut.1).map(|_| Saved { shot_id: shot, clip_id, marks: cut });
+            let trimmed = qnc_virtual_shots::trim_short_now(&target, &shot, cut.0, cut.1, (&tc_in, &tc_out)).map(|_| Saved { shot_id: shot, clip_id, marks: cut });
             let _ = sender.send(trimmed);
         });
         if started.is_ok() {
@@ -160,11 +174,12 @@ impl ShortSave {
         let target = target.ok_or_else(|| text("story.msg.db_not_writable"))?.clone();
         let project_id = project_id.ok_or_else(|| text("story.msg.no_active_project"))?.to_string();
         let (clip_id, name) = (clip.clip_id.clone(), clip.name.clone());
+        let (tc_in, tc_out) = self.labels(&clip_id, (in_frame, out_frame));
         let (sender, receiver) = mpsc::channel();
         std::thread::Builder::new()
             .name("qnc-short-save".into())
             .spawn(move || {
-                let saved = qnc_virtual_shots::save_short_now(&target, &project_id, &clip_id, &name, in_frame, out_frame)
+                let saved = qnc_virtual_shots::save_short_now(&target, &project_id, &clip_id, &name, in_frame, out_frame, (&tc_in, &tc_out))
                     .map(|shot| Saved { shot_id: shot.shot_id, clip_id, marks: (in_frame, out_frame) });
                 let _ = sender.send(saved);
             })
@@ -199,10 +214,11 @@ impl ShortSave {
             return true;
         }
         log(&format!("short-save overwrites {}", asked.shot_id));
+        let (tc_in, tc_out) = self.labels(&asked.clip_id, asked.marks);
         let (sender, receiver) = mpsc::channel();
         let started = std::thread::Builder::new().name("qnc-short-overwrite".into()).spawn(move || {
             let (in_frame, out_frame) = asked.marks;
-            let written = qnc_virtual_shots::trim_short_now(&asked.target, &asked.shot_id, in_frame, out_frame)
+            let written = qnc_virtual_shots::trim_short_now(&asked.target, &asked.shot_id, in_frame, out_frame, (&tc_in, &tc_out))
                 .map(|_| Saved { shot_id: asked.shot_id, clip_id: asked.clip_id, marks: asked.marks });
             let _ = sender.send(written);
         });

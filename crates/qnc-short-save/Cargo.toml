@@ -12,3 +12,4 @@ qnc-db-broker = { workspace = true }
 qnc-dev-diagnostics = { workspace = true }
 qnc-ui-text = { workspace = true }
 qnc-virtual-shots = { workspace = true }
+qnc-source-timecode = { workspace = true }

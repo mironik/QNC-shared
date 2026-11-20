@@ -5617,6 +5617,7 @@ dependencies = [
  "qnc-db-broker",
  "qnc-dev-diagnostics",
  "qnc-notice",
+ "qnc-source-timecode",
  "qnc-ui-text",
  "qnc-virtual-short-cards",
  "qnc-virtual-shots",
@@ -6286,6 +6287,7 @@ dependencies = [
  "candle-core",
  "candle-nn",
  "qnc-transcribe-jobs",
+ "rayon",
  "serde_json",
 ]
 

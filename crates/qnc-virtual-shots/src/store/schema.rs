@@ -35,11 +35,14 @@ pub(crate) fn ensure_virtual_shots_schema(conn: &Connection) -> Result<()> {
     add_virtual_column_if_missing(conn, "still_error", "TEXT")?;
     // A B-roll shot is kept once its cover is written (third audit 2026-10-17).
     add_virtual_column_if_missing(conn, "cover_pending", "INTEGER NOT NULL DEFAULT 0")?;
+    // IN and OUT as the camera's timecode (user 2026-11-20: "time kod je jedino mjerilo").
+    add_virtual_column_if_missing(conn, "tc_in", "TEXT NOT NULL DEFAULT ''")?;
+    add_virtual_column_if_missing(conn, "tc_out", "TEXT NOT NULL DEFAULT ''")?;
     conn.execute_batch(
         "DROP VIEW IF EXISTS public_short_clips;
         CREATE VIEW public_short_clips AS
         SELECT shot_id, clip_id, in_frame, out_frame, source_shot_id, name, created_at_utc,
-               in_still_uri, out_still_uri, still_status, still_error
+               in_still_uri, out_still_uri, still_status, still_error, tc_in, tc_out
         FROM virtual_shots
         WHERE class = 'short';
         DROP VIEW IF EXISTS public_b_roll_clips;

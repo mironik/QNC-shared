@@ -56,6 +56,12 @@ pub enum Operation {
         clip_name: String,
         in_frame: u64,
         out_frame: u64,
+        /// IN and OUT as the camera's timecode (user 2026-11-20: "time kod je jedino mjerilo");
+        /// the frames stay for the player. Empty when the clip has no timecode.
+        #[serde(default)]
+        tc_in: String,
+        #[serde(default)]
+        tc_out: String,
     },
     /// v5 `add_virtual_shot_from_frames` for a cover: the B-roll virtual shot of the
     /// source IN/OUT (its id comes back); the story puts it in a slot.
@@ -88,6 +94,10 @@ pub enum Operation {
         shot_id: String,
         in_frame: u64,
         out_frame: u64,
+        #[serde(default)]
+        tc_in: String,
+        #[serde(default)]
+        tc_out: String,
     },
     /// A SubClip (statement) removed (user 2026-11-01: the same statement saved four times).
     /// Only a short; a B-roll shot of a cover is not removed here. Its still files stay.
@@ -263,6 +273,7 @@ pub fn save_short_now(
     name: &str,
     in_frame: u64,
     out_frame: u64,
+    (tc_in, tc_out): (&str, &str),
 ) -> Result<SavedShort> {
     let writer = VirtualShotsWriter::start(target.clone())?;
     match writer.call(&Operation::SaveShort {
@@ -271,15 +282,18 @@ pub fn save_short_now(
         clip_name: name.into(),
         in_frame,
         out_frame,
+        tc_in: tc_in.into(),
+        tc_out: tc_out.into(),
     })? {
         Data::SavedShort(shot) => Ok(shot),
         _ => Err(wrong()),
     }
 }
 
-/// New IN/OUT of a SubClip (fine tuned on the source timeline), written and waited for.
-pub fn trim_short_now(target: &ProjectDbTarget, shot_id: &str, in_frame: u64, out_frame: u64) -> Result<()> {
-    match VirtualShotsWriter::start(target.clone())?.call(&Operation::TrimShort { shot_id: shot_id.into(), in_frame, out_frame })? {
+/// New IN/OUT of a SubClip (fine tuned on the source timeline), with their timecode, written
+/// and waited for.
+pub fn trim_short_now(target: &ProjectDbTarget, shot_id: &str, in_frame: u64, out_frame: u64, (tc_in, tc_out): (&str, &str)) -> Result<()> {
+    match VirtualShotsWriter::start(target.clone())?.call(&Operation::TrimShort { shot_id: shot_id.into(), in_frame, out_frame, tc_in: tc_in.into(), tc_out: tc_out.into() })? {
         Data::Changed => Ok(()),
         _ => Err(wrong()),
     }

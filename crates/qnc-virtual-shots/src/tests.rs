@@ -36,7 +36,7 @@ fn project() -> (tempfile::TempDir, ProjectDbTarget) {
 }
 
 fn save(target: &ProjectDbTarget, clip: &str, range: (u64, u64)) -> Result<SavedShort> {
-    save_short_now(target, "p1", clip, "Mironik", range.0, range.1)
+    save_short_now(target, "p1", clip, "Mironik", range.0, range.1, ("10:00:00:00", "10:00:01:00"))
 }
 
 #[test]
@@ -78,11 +78,11 @@ fn a_fine_tuned_short_keeps_its_new_cut_and_its_stills_are_made_again() {
     let (_dir, target) = project();
     let shot = save(&target, "clip-a", (10, 40)).unwrap();
     publish_stills_now(&target, &shot.shot_id, Ok(("qnc://local/artifact/in.jpg".into(), "qnc://local/artifact/out.jpg".into()))).unwrap();
-    trim_short_now(&target, &shot.shot_id, 16, 38).unwrap();
+    trim_short_now(&target, &shot.shot_id, 16, 38, ("10:00:00:16", "10:00:00:38")).unwrap();
     let shorts = list_shorts(&target).unwrap();
     assert_eq!((shorts[0].in_frame, shorts[0].out_frame, shorts[0].still_status.as_str()), (16, 38, "pending"));
-    assert!(trim_short_now(&target, &shot.shot_id, 20, 20).is_err(), "OUT after IN");
-    assert!(trim_short_now(&target, "clip-a_shot_009", 1, 2).is_err(), "no such SubClip");
+    assert!(trim_short_now(&target, &shot.shot_id, 20, 20, ("", "")).is_err(), "OUT after IN");
+    assert!(trim_short_now(&target, "clip-a_shot_009", 1, 2, ("", "")).is_err(), "no such SubClip");
 }
 
 #[test]
@@ -206,4 +206,17 @@ fn an_unconfirmed_b_roll_shot_is_not_listed_and_goes_when_its_cover_never_came()
     writer.call(&Operation::ForgetUnconfirmedCoverShots { older_than_seconds: 0 }).unwrap();
     assert_eq!(rows(&dir.path().join("project.db")), 1, "the unconfirmed one went, the confirmed one stays");
     assert_eq!(b_roll(&target), 1);
+}
+
+#[test]
+fn a_statement_keeps_its_in_and_out_as_timecode_and_a_trim_writes_them_anew() {
+    let (dir, target) = project();
+    let shot = save(&target, "clip-a", (10, 40)).unwrap();
+    let timecode = |path: &std::path::Path| -> (String, String) {
+        let conn = rusqlite::Connection::open(path).unwrap();
+        conn.query_row("SELECT tc_in, tc_out FROM public_short_clips", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap()
+    };
+    assert_eq!(timecode(&dir.path().join("project.db")), ("10:00:00:00".into(), "10:00:01:00".into()));
+    trim_short_now(&target, &shot.shot_id, 16, 38, ("10:00:00:16", "10:00:00:38")).unwrap();
+    assert_eq!(timecode(&dir.path().join("project.db")), ("10:00:00:16".into(), "10:00:00:38".into()));
 }
