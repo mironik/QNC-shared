@@ -141,7 +141,8 @@ impl ProgramSegments {
         let mut in_still = qnc_program_view::EditStill::new(in_frame, true, picture(in_frame)).labelled(&qnc_ui_text::text("story.still.in_first"));
         in_still.click = cue(in_frame);
         in_still.cut = taken;
-        let player = qnc_program_view::EditStill::new(playhead, true, picture(playhead)).labelled(&qnc_ui_text::text("zoom.player"));
+        let mut player = qnc_program_view::EditStill::new(playhead, true, picture(playhead)).labelled(&qnc_ui_text::text("zoom.player"));
+        player.live = true; // the player itself, the monitor's picture as it plays
         let mut out_still = qnc_program_view::EditStill::new(out_frame, false, picture(last)).labelled(&qnc_ui_text::text("story.still.out_last"));
         out_still.click = cue(last);
         out_still.cut = !taken;

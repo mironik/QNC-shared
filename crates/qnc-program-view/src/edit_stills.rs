@@ -51,6 +51,9 @@ pub struct EditStill {
     /// The length strip of the slot the picture shows, as on the timeline (user 2026-11-05: a
     /// left click on it selects the slot, in the timeline and in the zoom); `None`: no strip.
     pub strip: Option<StillStrip>,
+    /// The place shows the player itself, the monitor's picture as it plays (user 2026-11-20:
+    /// "in the zoom the player moves into the middle window"), not a decoded still.
+    pub live: bool,
 }
 
 /// The length strip under a zoom picture: the slot's length in the colour of its length.
@@ -173,7 +176,7 @@ impl EditStill {
         let id = picture
             .as_ref()
             .map_or_else(String::new, |p| format!("qnc_edit_still:{}:{}", p.clip_id, p.source_frame));
-        Self { marker_frame, after, picture, image: None, id, label: String::new(), cut: false, clip_edge: None, clip_frames: None, past_end: false, click: None, right_click: None, strip: None }
+        Self { marker_frame, after, picture, image: None, id, label: String::new(), cut: false, clip_edge: None, clip_frames: None, past_end: false, click: None, right_click: None, strip: None, live: false }
     }
 
     /// The same picture with what it is.
