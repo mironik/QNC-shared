@@ -61,6 +61,14 @@ impl WordLetters {
     }
 }
 
+/// Whether letters belong to a word said `[from, to)` (clip frames): every timed letter lies
+/// within `reach` frames of it (live 2026-11-20: "broju" said 956-967 was kept with letters past
+/// 1012, laid onto the "broj" of the next sentence). Letters that do not fit are not kept.
+pub fn letters_fit(letters: &[Letter], from: u64, to: u64, reach: u64) -> bool {
+    let (low, high) = (from.saturating_sub(reach) as f64, (to.max(from + 1) + reach) as f64);
+    letters.iter().all(|letter| letter.from.is_none_or(|at| at >= low && at <= high) && letter.to.is_none_or(|at| at >= low && at <= high))
+}
+
 /// The letters kept for the word of a clip that starts at `from` with `text`.
 pub fn letters_of<'a>(kept: &'a [WordLetters], from: u64, text: &str) -> Option<&'a WordLetters> {
     let text = text.trim();
@@ -74,11 +82,13 @@ pub enum Operation {
     Save { clip_id: String, engine: String, words: Vec<WordLetters> },
     /// Every word of a clip with its letters.
     ReadClip { clip_id: String },
+    /// The letters of words of a clip are dropped (laid wrong: they get laid again).
+    Forget { clip_id: String, words: Vec<(u64, String)> },
 }
 
 impl Operation {
     pub fn is_write(&self) -> bool {
-        matches!(self, Self::Save { .. })
+        matches!(self, Self::Save { .. } | Self::Forget { .. })
     }
 }
 
@@ -115,6 +125,13 @@ pub fn read_clip(target: &ProjectDbTarget, clip_id: &str) -> Result<Vec<WordLett
 pub fn save(target: &ProjectDbTarget, clip_id: &str, engine: &str, words: Vec<WordLetters>) -> Result<()> {
     let mut client = target.open(Access::ReadWrite, vec![LetterModule::factory()])?;
     client.execute(MODULE_ID, encode(&Operation::Save { clip_id: clip_id.into(), engine: engine.into(), words })?)?;
+    Ok(())
+}
+
+/// Drops the letters of `words` (word start, text) of `clip_id` (through the project's intermediary).
+pub fn forget(target: &ProjectDbTarget, clip_id: &str, words: Vec<(u64, String)>) -> Result<()> {
+    let mut client = target.open(Access::ReadWrite, vec![LetterModule::factory()])?;
+    client.execute(MODULE_ID, encode(&Operation::Forget { clip_id: clip_id.into(), words })?)?;
     Ok(())
 }
 

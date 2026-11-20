@@ -31,6 +31,7 @@ impl Store {
             Operation::ReadClip { .. } if !self.schema_ready => Ok(Data::Words(Vec::new())),
             Operation::ReadClip { clip_id } => self.read(clip_id),
             Operation::Save { clip_id, engine, words } => self.save(clip_id, engine, words),
+            Operation::Forget { clip_id, words } => self.forget(clip_id, words),
         }
     }
 
@@ -55,6 +56,16 @@ impl Store {
                 params![clip_id, word.word_from as i64, word.text, letters, engine],
             )
             .map_err(err)?;
+        }
+        tx.commit().map_err(err)?;
+        Ok(Data::Changed)
+    }
+
+    fn forget(&mut self, clip_id: &str, words: &[(u64, String)]) -> Result<Data> {
+        valid_clip(clip_id)?;
+        let tx = qnc_db_broker::begin_write(&mut self.conn).map_err(err)?;
+        for (word_from, text) in words {
+            tx.execute("DELETE FROM word_letters WHERE clip_id = ?1 AND word_from = ?2 AND text = ?3", params![clip_id, *word_from as i64, text]).map_err(err)?;
         }
         tx.commit().map_err(err)?;
         Ok(Data::Changed)

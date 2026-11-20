@@ -33,3 +33,14 @@ fn the_letters_of_a_word_are_kept_and_made_again_replace_them() {
     bad.letters[0].to = None;
     assert!(save(&target, "clip-a", "test", vec![bad]).is_err(), "a letter with a start and no end is refused");
 }
+
+/// Live 2026-11-20: "broju" said 956-967 kept with letters past 1012 (the next sentence's "broj").
+#[test]
+fn letters_away_from_their_word_do_not_fit_and_are_forgotten() {
+    assert!(letters_fit(&word(956, "broju", 958.0).letters, 956, 967, 25));
+    assert!(!letters_fit(&word(956, "broju", 1012.0).letters, 956, 967, 25), "past the reach");
+    let (_dir, target) = project();
+    save(&target, "clip-a", "test", vec![word(956, "broju", 1012.0), word(970, "stanovnika", 970.0)]).unwrap();
+    forget(&target, "clip-a", vec![(956, "broju".into())]).unwrap();
+    assert_eq!(read_clip(&target, "clip-a").unwrap(), vec![word(970, "stanovnika", 970.0)]);
+}
