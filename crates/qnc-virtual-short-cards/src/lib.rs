@@ -32,6 +32,9 @@ pub struct VirtualShortCard {
     pub poster_image: Option<Arc<qnc_image_assets::RgbaImage>>,
     /// The shot of a cover: the B-roll tab shows it, the Virtual tab does not.
     pub b_roll: bool,
+    /// Who speaks and their role (the caption the director puts in, user 2026-11-19).
+    pub caption_name: String,
+    pub caption_role: String,
 }
 
 /// The chosen SubClip (not a B-roll shot) as `(shot, clip, (in, out))`, for its fine tuning.
@@ -83,6 +86,8 @@ pub fn build_card(
         poster_uri: row.in_still_uri,
         poster_image: None,
         b_roll: row.b_roll,
+        caption_name: row.caption_name,
+        caption_role: row.caption_role,
     }
 }
 
@@ -146,6 +151,8 @@ pub fn saving(cards: &mut Vec<VirtualShortCard>, clips: &[qnc_clip_row::ClipRow]
         poster_uri: None,
         poster_image: in_picture.or_else(|| clip.thumb_image.clone()),
         b_roll: false,
+        caption_name: String::new(),
+        caption_role: String::new(),
     });
 }
 
@@ -217,6 +224,8 @@ mod tests {
             out_still_uri: Some("qnc://local/project/p1/virtual_shorts/shot-1/out.jpg".into()),
             still_status: "ready".into(),
             b_roll: false,
+            caption_name: String::new(),
+            caption_role: String::new(),
         }
     }
 

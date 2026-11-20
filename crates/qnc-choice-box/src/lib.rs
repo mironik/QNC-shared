@@ -50,6 +50,45 @@ pub fn show_option(ctx: &egui::Context, theme: &qnc_desktop_theme::Theme, choice
                         ui.add_space(8.0);
                         ui.label(RichText::new(&choice.solution).color(theme.text).size(theme.font_ui));
                     }
+                    // The fields the user writes in (user 2026-11-19: the name and the role of who
+                    // speaks), kept by the box while it is open (filled in from the question when
+                    // it opens): the first takes the keyboard, Enter goes to the next, Enter in the
+                    // last is the proposed option. An option that takes the fields carries them.
+                    let (opened_id, values_id) = (egui::Id::new("qnc_choice_box_opened"), egui::Id::new("qnc_choice_box_values"));
+                    let opened = ui.ctx().memory(|memory| memory.data.get_temp::<bool>(opened_id).unwrap_or(false));
+                    let mut values: Vec<String> = match opened {
+                        true => ui.ctx().memory(|memory| memory.data.get_temp(values_id)).unwrap_or_default(),
+                        false => choice.fields.iter().map(|field| field.value.clone()).collect(),
+                    };
+                    values.resize(choice.fields.len(), String::new());
+                    let mut entered = false;
+                    for (index, field) in choice.fields.iter().enumerate() {
+                        ui.add_space(8.0);
+                        ui.label(RichText::new(&field.label).color(theme.text_muted).size(theme.font_ui));
+                        let id = egui::Id::new(("qnc_choice_box_field", index));
+                        let response = ui.add(qnc_ui_kit::row_field(&mut values[index], WIDTH, theme.chrome_control_height).id(id));
+                        if index == 0 && !opened {
+                            response.request_focus();
+                        }
+                        if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                            match index + 1 < choice.fields.len() {
+                                true => ui.ctx().memory_mut(|memory| memory.request_focus(egui::Id::new(("qnc_choice_box_field", index + 1)))),
+                                false => entered = true,
+                            }
+                        }
+                    }
+                    let fields: Vec<qnc_notice::ChoiceField> = choice.fields.iter().zip(&values).map(|(field, value)| qnc_notice::ChoiceField { label: field.label.clone(), value: value.clone() }).collect();
+                    let with_fields = |option: &ChoiceOption| match option.takes_fields {
+                        true => ChoiceOption { target: Some(qnc_notice::fields_target(&fields)), ..option.clone() },
+                        false => option.clone(),
+                    };
+                    ui.ctx().memory_mut(|memory| {
+                        memory.data.insert_temp(opened_id, true);
+                        memory.data.insert_temp(values_id, values.clone());
+                    });
+                    if entered {
+                        chosen = choice.options.iter().find(|option| option.strong).map(with_fields);
+                    }
                     ui.add_space(12.0);
                     // Many options (the groups of a shot) wrap onto more lines.
                     ui.horizontal_wrapped(|ui| {
@@ -60,11 +99,15 @@ pub fn show_option(ctx: &egui::Context, theme: &qnc_desktop_theme::Theme, choice
                                 qnc_ui_kit::chrome_button(ui, &option.label, true, false, qnc_theme_styles::button(theme)).clicked()
                             };
                             if clicked {
-                                chosen = Some(option.clone());
+                                chosen = Some(with_fields(option));
                             }
                         }
                     });
                 });
         });
+    // The next question takes the keyboard into its first field again.
+    if chosen.is_some() {
+        ctx.memory_mut(|memory| memory.data.insert_temp(egui::Id::new("qnc_choice_box_opened"), false));
+    }
     chosen
 }

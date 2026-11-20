@@ -59,5 +59,5 @@ pub(crate) fn choice_of(found: &[InTheWay], needs: Needs, selected: usize) -> Ch
         options.push(ChoiceOption::new(SKIP_CONFLICTS, qnc_ui_text::fill("ingest.choice.import_others", &[("count", &others)]), true));
     }
     options.push(ChoiceOption::new(CANCEL_IMPORT, qnc_ui_text::text("ingest.choice.cancel"), options.is_empty()));
-    Choice { title: qnc_ui_text::text("ingest.choice.title").into(), message, items, solution: qnc_ui_text::text(solution).into(), options }
+    Choice { title: qnc_ui_text::text("ingest.choice.title").into(), message, items, solution: qnc_ui_text::text(solution).into(), options, fields: Vec::new() }
 }

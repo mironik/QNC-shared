@@ -59,6 +59,9 @@ pub(crate) fn short_clip_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ShortC
         out_still_uri: row.get(6)?,
         still_status: row.get(7)?,
         b_roll: false,
+        // Only the shorts' view has them (an older one, the B-roll's: empty).
+        caption_name: row.get(8).unwrap_or_default(),
+        caption_role: row.get(9).unwrap_or_default(),
     })
 }
 

@@ -32,11 +32,16 @@ pub struct ShortSave {
     /// The clip shown and its camera timecode: IN and OUT are written as timecode too (user
     /// 2026-11-20: "time kod je jedino mjerilo"; the frames stay for the player).
     timecode: Option<(String, qnc_source_timecode::SourceTimecode)>,
+    /// A new statement waiting for its caption (user 2026-11-19).
+    captioning: Option<Writing>,
 }
 
 /// The catalog actions of the question "the same statement is already there".
 pub const OVERWRITE: &str = "statement_overwrite";
 pub const CANCEL: &str = "statement_cancel";
+/// The caption of a new statement written (target: the fields) or given up.
+pub const CAPTION_SAVE: &str = "statement_caption_save";
+pub const CAPTION_CANCEL: &str = "statement_caption_cancel";
 
 /// A save asked about: the statement already there with the same clip and IN/OUT.
 #[derive(Debug, Clone)]
@@ -150,38 +155,34 @@ impl ShortSave {
         }
         // Why a SubClip was not saved goes to the log too (live 2026-10-28: none was saved and
         // the log did not say why).
-        let started = self.check_and_write(chosen, clips, marks, target, project_id);
-        if let Err(error) = &started {
+        let checked = check(chosen, clips, marks, target, project_id);
+        if let Err(error) = &checked {
             log(&format!("short-save refused clip={chosen:?} marks={marks:?}: {error}"));
         }
-        started
+        // Who speaks and their role are asked before it is written (user 2026-11-19: the caption
+        // the director puts in); the last ones written for this clip are offered.
+        let mut writing = checked?;
+        let last = saved.iter().rev().find(|card| !card.b_roll && card.clip_id == writing.clip_id && !card.caption_name.is_empty());
+        writing.caption = last.map(|card| (card.caption_name.clone(), card.caption_role.clone())).unwrap_or_default();
+        self.captioning = Some(writing);
+        Ok(())
     }
 
-    fn check_and_write(
-        &mut self,
-        chosen: Option<&str>,
-        clips: &[ClipRow],
-        marks: Option<(u64, u64)>,
-        target: Option<&ProjectDbTarget>,
-        project_id: Option<&str>,
-    ) -> Result<(), String> {
-        let clip_id = chosen.ok_or_else(|| text("story.msg.pick_clip"))?;
-        let clip = clips.iter().find(|clip| clip.clip_id == clip_id).ok_or_else(|| text("ingest.msg.clip_not_found"))?;
-        // Whether the clip is imported is the database's, read when the short is written
-        // (`qnc-virtual-shots`), not the pool row a form read earlier (live 2026-10-29: a clip
-        // imported after the pool was read could not become a SubClip).
-        let (in_frame, out_frame) = marks.ok_or_else(|| text("story.msg.marks_not_confirmed"))?;
-        let target = target.ok_or_else(|| text("story.msg.db_not_writable"))?.clone();
-        let project_id = project_id.ok_or_else(|| text("story.msg.no_active_project"))?.to_string();
-        let (clip_id, name) = (clip.clip_id.clone(), clip.name.clone());
-        let (tc_in, tc_out) = self.labels(&clip_id, (in_frame, out_frame));
+    /// Writes the statement with its caption and its IN and OUT as timecode.
+    fn write(&mut self, writing: Writing) -> Result<(), String> {
+        let (tc_in, tc_out) = self.labels(&writing.clip_id, writing.marks);
+        let Writing { clip_id, name, marks: (in_frame, out_frame), target, project_id, caption: (caption_name, caption_role) } = writing;
         let (sender, receiver) = mpsc::channel();
         std::thread::Builder::new()
             .name("qnc-short-save".into())
             .spawn(move || {
-                let saved = qnc_virtual_shots::save_short_now(&target, &project_id, &clip_id, &name, in_frame, out_frame, (&tc_in, &tc_out))
-                    .map(|shot| Saved { shot_id: shot.shot_id, clip_id, marks: (in_frame, out_frame) });
-                let _ = sender.send(saved);
+                let saved = qnc_virtual_shots::save_short_now(&target, &project_id, &clip_id, &name, in_frame, out_frame, (&tc_in, &tc_out)).and_then(|shot| {
+                    if !caption_name.trim().is_empty() || !caption_role.trim().is_empty() {
+                        qnc_virtual_shots::set_caption_now(&target, &shot.shot_id, &caption_name, &caption_role)?;
+                    }
+                    Ok(Saved { shot_id: shot.shot_id, clip_id, marks: (in_frame, out_frame) })
+                });
+                let _ = sender.send(saved.map_err(|error| error.to_string()));
             })
             .map_err(|error| error.to_string())?;
         self.pending = Some(receiver);
@@ -189,8 +190,20 @@ impl ShortSave {
     }
 
     /// The question while the same statement is already there: an overlay with Overwrite and
-    /// Cancel (user 2026-11-01).
+    /// Cancel (user 2026-11-01); while a new one waits for its caption: who speaks and their role.
     pub fn question(&self) -> Option<qnc_notice::Choice> {
+        let option = |action_id: &str, code: &'static str, strong| qnc_notice::ChoiceOption::new(action_id, text(code), strong);
+        if let Some(writing) = &self.captioning {
+            let field = |code: &'static str, value: &str| qnc_notice::ChoiceField { label: text(code), value: value.to_string() };
+            return Some(qnc_notice::Choice {
+                title: text("statement.caption_title"),
+                message: text("statement.caption_message"),
+                items: vec![writing.name.clone()],
+                solution: String::new(),
+                options: vec![option(CAPTION_CANCEL, "common.cancel", false), option(CAPTION_SAVE, "common.save", true).taking_fields()],
+                fields: vec![field("statement.caption_name", &writing.caption.0), field("statement.caption_role", &writing.caption.1)],
+            });
+        }
         let asked = self.asked.as_ref()?;
         let option = |action_id: &str, code: &'static str, strong| qnc_notice::ChoiceOption::new(action_id, text(code), strong);
         Some(qnc_notice::Choice {
@@ -199,13 +212,28 @@ impl ShortSave {
             items: vec![asked.name.clone()],
             solution: text("statement.exists_solution"),
             options: vec![option(OVERWRITE, "statement.overwrite", false), option(CANCEL, "common.cancel", true)],
+            fields: Vec::new(),
         })
     }
 
     /// The answer to the question; `false`: `action_id` is not one of its answers. Overwrite
     /// writes the statement already there again (its IN/OUT and stills made anew), never a
     /// second one; Cancel leaves it.
-    pub fn answer(&mut self, action_id: &str) -> bool {
+    pub fn answer(&mut self, action_id: &str, target: Option<&str>) -> bool {
+        // The caption of a new statement: Save writes it with what was written, Cancel writes nothing.
+        if action_id == CAPTION_SAVE || action_id == CAPTION_CANCEL {
+            let Some(mut writing) = self.captioning.take() else { return true };
+            if action_id == CAPTION_CANCEL {
+                return true;
+            }
+            let fields = target.map(qnc_notice::fields_of).unwrap_or_default();
+            writing.caption = (fields.first().cloned().unwrap_or_default(), fields.get(1).cloned().unwrap_or_default());
+            log(&format!("short-save caption name={:?} role={:?}", writing.caption.0, writing.caption.1));
+            if let Err(error) = self.write(writing) {
+                log(&format!("short-save not started: {error}"));
+            }
+            return true;
+        }
         if action_id != OVERWRITE && action_id != CANCEL {
             return false;
         }
@@ -296,6 +324,8 @@ mod tests {
             poster_uri: None,
             poster_image: None,
             b_roll,
+            caption_name: String::new(),
+            caption_role: String::new(),
         };
         let target = ProjectDbTarget::from_owner_binding(std::path::Path::new("nowhere.db"), "qnc://local/db/project_db/p1").unwrap();
         let mut save = ShortSave::new();
@@ -304,8 +334,40 @@ mod tests {
         assert_eq!(save.asked.as_ref().map(|a| a.shot_id.as_str()), Some("c_shot_001"));
         assert_eq!(question.options.iter().map(|o| o.action_id.as_str()).collect::<Vec<_>>(), [OVERWRITE, CANCEL]);
         assert!(save.pending.is_none(), "nothing is written while asking");
-        assert!(!save.answer("play_pause"), "not an answer");
-        assert!(save.answer(CANCEL));
+        assert!(!save.answer("play_pause", None), "not an answer");
+        assert!(save.answer(CANCEL, None));
         assert!(save.question().is_none() && save.pending.is_none(), "Cancel writes nothing");
+        // A new statement asks who speaks first, offering the last caption of its clip.
+        let captioned = qnc_virtual_short_cards::VirtualShortCard { in_frame: 10, out_frame: 20, caption_name: "Ana Anić".into(), caption_role: "gradonačelnica".into(), ..card(false) };
+        assert!(save.start(Some("c"), &[clip(true)], Some((0, 5)), Some(&target), Some("p"), &[captioned]).is_ok());
+        let asked = save.question().expect("the caption is asked");
+        assert_eq!(asked.fields.iter().map(|f| f.value.as_str()).collect::<Vec<_>>(), ["Ana Anić", "gradonačelnica"]);
+        assert!(save.pending.is_none(), "nothing is written before the caption");
+        assert!(save.answer(CAPTION_CANCEL, None));
+        assert!(save.question().is_none() && save.pending.is_none(), "Cancel writes no statement");
     }
+}
+
+/// A new statement checked and waiting for its caption.
+#[derive(Debug, Clone)]
+struct Writing {
+    clip_id: String,
+    name: String,
+    marks: (u64, u64),
+    target: ProjectDbTarget,
+    project_id: String,
+    /// Who speaks and their role.
+    caption: (String, String),
+}
+
+/// A new statement of `chosen` between `marks`, checked before it is written.
+fn check(chosen: Option<&str>, clips: &[ClipRow], marks: Option<(u64, u64)>, target: Option<&ProjectDbTarget>, project_id: Option<&str>) -> Result<Writing, String> {
+    let clip_id = chosen.ok_or_else(|| text("story.msg.pick_clip"))?;
+    let clip = clips.iter().find(|clip| clip.clip_id == clip_id).ok_or_else(|| text("ingest.msg.clip_not_found"))?;
+    // Whether the clip is imported is the database's, read when the short is written
+    // (`qnc-virtual-shots`), not the pool row a form read earlier (live 2026-10-29).
+    let marks = marks.ok_or_else(|| text("story.msg.marks_not_confirmed"))?;
+    let target = target.ok_or_else(|| text("story.msg.db_not_writable"))?.clone();
+    let project_id = project_id.ok_or_else(|| text("story.msg.no_active_project"))?.to_string();
+    Ok(Writing { clip_id: clip.clip_id.clone(), name: clip.name.clone(), marks, target, project_id, caption: Default::default() })
 }
