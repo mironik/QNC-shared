@@ -109,11 +109,16 @@ pub struct SourcePick {
     pub curves: [Vec<(u64, i16)>; 2],
     /// A statement is enlarged on the source timeline: its trim zoom has four pictures.
     pub statement: bool,
+    /// The window of the enlarged statement on the source timeline (clip frames): its zoom
+    /// holds the same range (user 2026-11-20: "the zoom has the whole range of the timeline").
+    pub statement_window: Option<(u64, u64)>,
 }
 
 impl SourcePick {
     /// Whether a statement is enlarged on the source timeline.
-    pub fn with_statement(mut self, statement: bool) -> Self {
+    pub fn with_statement(mut self, window: Option<(u64, u64)>) -> Self {
+        self.statement_window = window;
+        let statement = window.is_some();
         self.statement = statement;
         self
     }
@@ -157,6 +162,7 @@ impl SourcePick {
             lane_choices: [None, None],
             curves: [Vec::new(), Vec::new()],
             statement: false,
+            statement_window: None,
         }
     }
 

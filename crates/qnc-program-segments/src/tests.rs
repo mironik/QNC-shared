@@ -1366,19 +1366,22 @@ fn the_sound_assistants_proposal_is_kept_only_while_it_is_on_and_proposes() {
 fn a_statements_zoom_is_its_in_the_player_and_its_out_and_the_taken_edge_is_the_cut() {
     let mut segments = component();
     let frames = |segments: &ProgramSegments| segments.view().source_edit_stills.iter().map(|still| (still.picture.as_ref().map(|p| p.source_frame), still.cut)).collect::<Vec<_>>();
-    segments.set_source(marked(10).with_statement(true).with_taken(Some(true)));
+    segments.set_source(marked(10).with_statement(Some((0, 100))).with_taken(Some(true)));
     assert_eq!(frames(&segments), [(Some(10), true), (Some(10), false), (Some(59), false)], "no player frame yet: the player shows the taken IN");
-    let mut pick = marked(10).with_statement(true).with_taken(Some(false));
+    let mut pick = marked(10).with_statement(Some((0, 100))).with_taken(Some(false));
     pick.marks = Some((10, 40));
     segments.set_source(pick);
     assert_eq!(frames(&segments), [(Some(10), false), (Some(39), false), (Some(39), true)]);
+    // The zoom holds the range the enlarged timeline shows (user 2026-11-20).
+    let sound = segments.view().zoom_sound.clone().expect("a zoom");
+    assert_eq!((sound.from, sound.to), (0, 100));
 }
 
 /// User 2026-11-20: a click on the IN picture puts the playhead on IN, on the OUT picture on OUT.
 #[test]
 fn a_click_on_the_in_or_out_picture_of_a_statements_zoom_puts_the_playhead_there() {
     let mut segments = component();
-    let mut pick = marked(10).with_statement(true).with_taken(Some(true));
+    let mut pick = marked(10).with_statement(Some((0, 100))).with_taken(Some(true));
     pick.marks = Some((10, 40));
     segments.set_source(pick);
     let clicks: Vec<_> = segments.view().source_edit_stills.iter().map(|still| still.click.as_ref().map(|click| (click.action.clone(), click.value))).collect();
