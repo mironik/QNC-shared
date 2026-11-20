@@ -22,6 +22,8 @@ const LAST_END_REACH: u64 = 10;
 const UNHEARD_MIN: u64 = 4;
 /// The lowest voice: -42 dBFS in per mille of full scale.
 const VOICE_FLOOR: u16 = 8;
+/// How far a word kept in the quiet may go to the voice no word covers (frames, 0.8 s at 50 fps).
+const QUIET_WORD_REACH: u64 = 40;
 
 /// A word's frames, `to` past its last frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +42,11 @@ pub struct Aligned {
 /// `words` (in order) of the window `[from, to)` moved to the sound whose column peaks
 /// (per mille of full scale, evenly over the window) are `peaks`.
 pub fn align(from: u64, to: u64, peaks: &[u16], words: &[Span]) -> Aligned {
+    align_kept(from, to, peaks, words, &[])
+}
+
+/// As `align`, a word marked `kept` (its letters laid) keeping its own times on voice.
+pub fn align_kept(from: u64, to: u64, peaks: &[u16], words: &[Span], kept: &[bool]) -> Aligned {
     let levels = frame_levels(from, to, peaks);
     if levels.is_empty() || words.is_empty() {
         return Aligned { words: words.to_vec(), unheard: Vec::new() };
@@ -95,6 +102,50 @@ pub fn align(from: u64, to: u64, peaks: &[u16], words: &[Span]) -> Aligned {
         }
         aligned.push(Span { from: start, to: end.min(limit.max(start + 1)) });
     }
+    // A word with its letters laid keeps their times (they are finer than the peaks), but not in
+    // the quiet (live 2026-11-20: "prema" given 910-922 in the quiet, said at 943-955, the zoom
+    // showed its voice as unheard): one with no voice under it goes onto the voice no word covers
+    // between its neighbours; one with voice runs on into the unheard voice at its edges.
+    for (index, word) in words.iter().enumerate().filter(|(index, _)| kept.get(*index).copied().unwrap_or(false)) {
+        aligned[index] = *word;
+    }
+    for index in 0..aligned.len() {
+        if !kept.get(index).copied().unwrap_or(false) {
+            continue;
+        }
+        let word = aligned[index];
+        let before = if index == 0 { from } else { aligned[index - 1].to };
+        let after = aligned.get(index + 1).map_or(to, |next| next.from);
+        let runs = unheard_runs(from, to, &loud, &aligned);
+        let inside = word.from.max(from)..word.to.min(to);
+        if inside.is_empty() {
+            continue;
+        }
+        if !inside.clone().any(&loud) {
+            let nearest = runs
+                .iter()
+                .filter(|run| run.from >= before && run.to <= after && run.from.abs_diff(word.from).min(run.to.abs_diff(word.to)) <= QUIET_WORD_REACH)
+                .min_by_key(|run| run.from.abs_diff(word.from).min(run.to.abs_diff(word.to)));
+            if let Some(run) = nearest {
+                aligned[index] = *run;
+            }
+        } else {
+            let mut span = word;
+            if let Some(run) = runs.iter().find(|run| run.to + 1 >= span.from && run.to <= span.from + 1 && run.from >= before) {
+                span.from = run.from;
+            }
+            if let Some(run) = runs.iter().find(|run| run.from <= span.to + 1 && run.from + 1 >= span.to && run.to <= after) {
+                span.to = run.to;
+            }
+            aligned[index] = span;
+        }
+    }
+    let unheard = unheard_runs(from, to, &loud, &aligned);
+    Aligned { words: aligned, unheard }
+}
+
+/// The voice no word covers, runs of `UNHEARD_MIN` frames or more.
+fn unheard_runs(from: u64, to: u64, loud: &dyn Fn(u64) -> bool, aligned: &[Span]) -> Vec<Span> {
     let mut unheard = Vec::new();
     let mut run: Option<u64> = None;
     for frame in from..=to {
@@ -110,7 +161,7 @@ pub fn align(from: u64, to: u64, peaks: &[u16], words: &[Span]) -> Aligned {
             _ => {}
         }
     }
-    Aligned { words: aligned, unheard }
+    unheard
 }
 
 
@@ -221,6 +272,18 @@ mod tests {
         let peaks = sound(&[(10, 20, 200), (40, 50, 200), (70, 80, 200)], 100);
         let aligned = align(0, 100, &peaks, &[Span { from: 10, to: 20 }, Span { from: 70, to: 80 }]);
         assert_eq!(aligned.unheard, vec![Span { from: 40, to: 50 }]);
+    }
+
+    #[test]
+    fn a_word_with_letters_in_the_quiet_goes_onto_the_voice_and_one_on_voice_takes_its_tail() {
+        // Live 2026-11-20: "prema" given 910-922 in the quiet, said 943-955; "stanovnika" given
+        // to 1006, its voice on to 1010.
+        let peaks = sound(&[(943, 955, 200), (956, 967, 200), (970, 1010, 200)], 1100);
+        let words = [Span { from: 916, to: 922 }, Span { from: 956, to: 967 }, Span { from: 970, to: 1006 }];
+        let aligned = align_kept(916, 1016, &peaks[916..1016].to_vec(), &words, &[true, false, true]);
+        assert_eq!(aligned.words[0], Span { from: 943, to: 955 });
+        assert_eq!(aligned.words[2], Span { from: 970, to: 1010 });
+        assert!(aligned.unheard.is_empty(), "{:?}", aligned.unheard);
     }
 
     #[test]
