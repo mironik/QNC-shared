@@ -30,7 +30,7 @@ const LABEL_HEIGHT: f32 = 22.0;
 const LANE_HEIGHT: f32 = 64.0;
 const LANES_GAP: f32 = 8.0;
 /// The row of the words said on A1, under its wave (user 2026-10-26).
-const WORDS_HEIGHT: f32 = 36.0;
+const WORDS_HEIGHT: f32 = 22.0;
 /// The sides of the taken cut's sound on A2 (user 2026-10-29), as red as on the Wrap row; a
 /// click within `SIDE_REACH` pixels takes a side.
 const SIDE_REACH: f32 = 40.0;
@@ -452,17 +452,18 @@ fn paint_words(ui: &mut egui::Ui, row: Rect, sound: &ZoomSound, x_of: &dyn Fn(u6
         if letters.is_empty() {
             ui.painter().with_clip_rect(cell).text(egui::pos2(cell.left(), row.center().y), Align2::LEFT_CENTER, word.text.trim(), font.clone(), visuals.text_color());
         } else {
-            let painter = ui.painter().with_clip_rect(Rect::from_min_max(egui::pos2(left, row.top()), egui::pos2(right, row.bottom())));
-            // The whole word stays written above its letters (user 2026-11-20: no word is lost
-            // when some of its letters have no time).
-            painter.text(egui::pos2(cell.left(), row.top() + 9.0), Align2::LEFT_CENTER, word.text.trim(), font.clone(), visuals.text_color());
+            // The whole word stays in its row; its letters are written on the A1 wave, each where
+            // it is said (user 2026-11-20: "letters on the wave").
+            ui.painter().with_clip_rect(cell).text(egui::pos2(cell.left(), row.center().y), Align2::LEFT_CENTER, word.text.trim(), font.clone(), visuals.text_color());
+            let wave = Rect::from_min_max(egui::pos2(left, row.top() - GAP / 4.0 - LANE_HEIGHT), egui::pos2(right, row.top() - GAP / 4.0));
+            let painter = ui.painter().with_clip_rect(wave);
             for &(letter, (a, b), _) in &letters {
                 let lit = under.is_some_and(|(_, (ua, _), _)| ua == a);
                 if lit {
-                    painter.rect_filled(Rect::from_min_max(egui::pos2(a, row.center().y), egui::pos2(b.max(a + 2.0), row.bottom() - 2.0)), 1.0, visuals.selection.bg_fill);
+                    painter.rect_filled(Rect::from_min_max(egui::pos2(a, wave.top() + 1.0), egui::pos2(b.max(a + 2.0), wave.top() + 17.0)), 1.0, visuals.selection.bg_fill);
                 }
-                painter.line_segment([egui::pos2(a, row.bottom() - 5.0), egui::pos2(a, row.bottom() - 1.0)], Stroke::new(1.0, visuals.weak_text_color()));
-                painter.text(egui::pos2(a + 1.0, row.bottom() - 11.0), Align2::LEFT_CENTER, letter, FontId::proportional(11.0), visuals.weak_text_color());
+                painter.line_segment([egui::pos2(a, wave.top()), egui::pos2(a, wave.bottom())], Stroke::new(1.0, visuals.weak_text_color().gamma_multiply(0.5)));
+                painter.text(egui::pos2(a + 2.0, wave.top() + 9.0), Align2::LEFT_CENTER, letter, FontId::proportional(13.0), visuals.text_color());
             }
         }
         if response.hovered() {
