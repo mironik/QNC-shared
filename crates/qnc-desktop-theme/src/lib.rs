@@ -68,6 +68,12 @@ pub fn danger() -> Color32 {
     Color32::from_rgb(239, 68, 68)
 }
 
+/// The background of text between IN and OUT: a dark, half transparent orange-yellow, white
+/// text on it well seen (user 2026-11-20: grey under white letters had little contrast).
+pub fn text_marked() -> Color32 {
+    Color32::from_rgba_unmultiplied(196, 120, 0, 140)
+}
+
 /// The colour of a status line that says work is done (an export written).
 pub fn done() -> Color32 {
     Color32::from_rgb(34, 197, 94)
