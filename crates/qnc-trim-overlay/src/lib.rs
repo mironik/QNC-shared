@@ -453,17 +453,17 @@ fn paint_words(ui: &mut egui::Ui, row: Rect, sound: &ZoomSound, x_of: &dyn Fn(u6
             ui.painter().with_clip_rect(cell).text(egui::pos2(cell.left(), row.center().y), Align2::LEFT_CENTER, word.text.trim(), font.clone(), visuals.text_color());
         } else {
             // The whole word stays in its row; its letters are written on the A1 wave, each where
-            // it is said (user 2026-11-20: "letters on the wave").
+            // it is said (user 2026-11-20: "letters on the wave"), in its middle, black.
             ui.painter().with_clip_rect(cell).text(egui::pos2(cell.left(), row.center().y), Align2::LEFT_CENTER, word.text.trim(), font.clone(), visuals.text_color());
             let wave = Rect::from_min_max(egui::pos2(left, row.top() - GAP / 4.0 - LANE_HEIGHT), egui::pos2(right, row.top() - GAP / 4.0));
             let painter = ui.painter().with_clip_rect(wave);
             for &(letter, (a, b), _) in &letters {
                 let lit = under.is_some_and(|(_, (ua, _), _)| ua == a);
                 if lit {
-                    painter.rect_filled(Rect::from_min_max(egui::pos2(a, wave.top() + 1.0), egui::pos2(b.max(a + 2.0), wave.top() + 17.0)), 1.0, visuals.selection.bg_fill);
+                    painter.rect_filled(Rect::from_min_max(egui::pos2(a, wave.center().y - 8.0), egui::pos2(b.max(a + 2.0), wave.center().y + 8.0)), 1.0, visuals.selection.bg_fill);
                 }
                 painter.line_segment([egui::pos2(a, wave.top()), egui::pos2(a, wave.bottom())], Stroke::new(1.0, visuals.weak_text_color().gamma_multiply(0.5)));
-                painter.text(egui::pos2(a + 2.0, wave.top() + 9.0), Align2::LEFT_CENTER, letter, FontId::proportional(13.0), visuals.text_color());
+                painter.text(egui::pos2(a + 2.0, wave.center().y), Align2::LEFT_CENTER, letter, FontId::proportional(14.0), Color32::BLACK);
             }
         }
         if response.hovered() {
