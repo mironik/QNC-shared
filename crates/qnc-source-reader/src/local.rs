@@ -14,6 +14,9 @@ use std::{
 pub struct LocalSource {
     source_uri: String,
     directory: Arc<Dir>,
+    /// The folder the source is, kept only to list a folder `cap-std` cannot (a shared folder of
+    /// the network); never shown.
+    root: PathBuf,
     match_case: MatchCase,
 }
 
@@ -39,10 +42,11 @@ impl LocalSource {
         else {
             return Err(ReadError::TransportConfig);
         };
-        let directory = Dir::open_ambient_dir(path, ambient_authority()).map_err(io_error)?;
+        let directory = Dir::open_ambient_dir(&path, ambient_authority()).map_err(io_error)?;
         Ok(Self {
             source_uri: source_uri.into(),
             directory: Arc::new(directory),
+            root: path,
             match_case: MatchCase::Exact,
         })
     }
@@ -155,36 +159,21 @@ impl LocalSource {
         reference: &SourceReference,
         max_entries: usize,
     ) -> Result<DirectoryListing, ReadError> {
-        let dir = self
-            .directory
-            .open_dir(reference.relative_path())
-            .map_err(io_error)?;
+        // A shared folder of the network (`\\host\share`, a card reader on a Jetson, user
+        // 2026-11-22) cannot be listed through `cap-std` ("not found"; its files open): it is
+        // listed by the folder of the source and the reference's own path (checked, never `..`).
+        let found = match self.capped_entries(reference, max_entries) {
+            Ok(found) => found,
+            Err(_) => self.plain_entries(reference, max_entries)?,
+        };
         let mut entries = Vec::new();
-        for entry in dir.entries().map_err(io_error)? {
-            if entries.len() == max_entries {
-                return Err(ReadError::TooLarge);
-            }
-            let entry = entry.map_err(io_error)?;
-            let name = entry
-                .file_name()
-                .into_string()
-                .map_err(|_| ReadError::InvalidUtf8)?;
+        for (name, kind) in found {
             let path = if reference.relative_path() == "." {
                 name.clone()
             } else {
                 format!("{}/{}", reference.relative_path(), name)
             };
             let child = SourceReference::new(&self.source_uri, &path)?;
-            let kind = entry.file_type().map_err(io_error)?;
-            let kind = if kind.is_symlink() {
-                EntryKind::Link
-            } else if kind.is_dir() {
-                EntryKind::Directory
-            } else if kind.is_file() {
-                EntryKind::File
-            } else {
-                EntryKind::Other
-            };
             entries.push(DirectoryEntry {
                 name,
                 reference: child,
@@ -206,6 +195,65 @@ impl LocalSource {
             return Err(ReadError::TooLarge);
         }
         Ok(listing)
+    }
+}
+
+impl LocalSource {
+    fn capped_entries(&self, reference: &SourceReference, max_entries: usize) -> Result<Vec<(String, EntryKind)>, ReadError> {
+        let opened;
+        let dir = if reference.relative_path() == "." {
+            &*self.directory
+        } else {
+            opened = self.directory.open_dir(reference.relative_path()).map_err(io_error)?;
+            &opened
+        };
+        let mut found = Vec::new();
+        for entry in dir.entries().map_err(io_error)? {
+            if found.len() == max_entries {
+                return Err(ReadError::TooLarge);
+            }
+            let entry = entry.map_err(io_error)?;
+            let name = entry.file_name().into_string().map_err(|_| ReadError::InvalidUtf8)?;
+            let kind = entry.file_type().map_err(io_error)?;
+            found.push((name, entry_kind(kind.is_symlink(), kind.is_dir(), kind.is_file())));
+        }
+        Ok(found)
+    }
+
+    fn plain_entries(&self, reference: &SourceReference, max_entries: usize) -> Result<Vec<(String, EntryKind)>, ReadError> {
+        reference.validate()?;
+        let mut folder = self.root.clone();
+        if reference.relative_path() != "." {
+            for part in reference.relative_path().split('/') {
+                if part.is_empty() || part == "." || part == ".." {
+                    return Err(ReadError::InvalidReference);
+                }
+                folder.push(part);
+            }
+        }
+        let mut found = Vec::new();
+        for entry in std::fs::read_dir(&folder).map_err(io_error)? {
+            if found.len() == max_entries {
+                return Err(ReadError::TooLarge);
+            }
+            let entry = entry.map_err(io_error)?;
+            let name = entry.file_name().into_string().map_err(|_| ReadError::InvalidUtf8)?;
+            let kind = entry.file_type().map_err(io_error)?;
+            found.push((name, entry_kind(kind.is_symlink(), kind.is_dir(), kind.is_file())));
+        }
+        Ok(found)
+    }
+}
+
+fn entry_kind(link: bool, dir: bool, file: bool) -> EntryKind {
+    if link {
+        EntryKind::Link
+    } else if dir {
+        EntryKind::Directory
+    } else if file {
+        EntryKind::File
+    } else {
+        EntryKind::Other
     }
 }
 
