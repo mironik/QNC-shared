@@ -206,6 +206,9 @@ type LoudnessKey = (u64, (u32, u32), u64, Vec<qnc_program_waveform::Placement>, 
 /// The program of the active project: read, written and turned into a view.
 #[derive(Default)]
 pub struct ProgramSegments {
+    /// The statement whose zoom stays open with no mark taken (user 2026-11-22: a click on the
+    /// player lets the mark go but keeps the zoom; Esc or Close closes it).
+    statement_zoom: Option<String>,
     /// Where the trim zoom's playhead is: the play, and a pause until the cut moves.
     zoom_follow: qnc_program_view::ZoomFollow,
     /// The last Cover slot / Overwrite asked for (see `SegmentsView::cover_pressed`).
@@ -583,9 +586,22 @@ impl ProgramSegments {
             .then_some(self.source.in_mark)
             .flatten();
         self.source = source;
+        if self.source.statement && self.source.taken.is_some() {
+            self.statement_zoom = self.source.clip_id.clone();
+        } else if !self.source.statement || self.statement_zoom != self.source.clip_id {
+            self.statement_zoom = None;
+        }
         self.view.source_edit_stills = self.source_stills();
         self.view.zoom_sound = self.zoom_sound(&self.view);
         self.arm_sync_on_new_in(previous_in);
+    }
+
+    /// Esc or the zoom's Close: the statement's zoom open with no mark taken closes.
+    pub fn close_statement_zoom(&mut self) {
+        if self.statement_zoom.take().is_some() {
+            self.view.source_edit_stills = self.source_stills();
+            self.view.zoom_sound = self.zoom_sound(&self.view);
+        }
     }
 
     /// Whether the playable program (segments or covers) changed since the last

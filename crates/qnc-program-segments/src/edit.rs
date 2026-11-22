@@ -123,9 +123,15 @@ impl ProgramSegments {
         if !edge.is_empty() {
             return edge;
         }
-        let (Some(clip_id), Some(taken), Some((in_frame, out_frame))) = (self.source.clip_id.as_ref(), self.source.taken, self.source.marks) else {
+        // A statement's zoom stays open after its mark is let go (no cut then).
+        let open = self.source.statement && self.statement_zoom.is_some() && self.statement_zoom == self.source.clip_id;
+        let (Some(clip_id), Some((in_frame, out_frame))) = (self.source.clip_id.as_ref(), self.source.marks) else {
             return Vec::new();
         };
+        let Some(taken) = self.source.taken.or(open.then_some(true)) else {
+            return Vec::new();
+        };
+        let held = self.source.taken.is_some();
         let picture = |frame: u64| Some(StillPicture { clip_id: clip_id.clone(), source_frame: frame });
         let in_cut = CutPictures { cut: in_frame, before: (in_frame > 0).then(|| (picture(in_frame - 1), qnc_ui_text::text("story.still.before_in"))), after: Some((picture(in_frame), qnc_ui_text::text("story.still.in_first"))), moving_after: true };
         let out_cut = CutPictures { cut: out_frame, before: Some((picture(out_frame.saturating_sub(1)), qnc_ui_text::text("story.still.out_last"))), after: (out_frame < self.source.duration_frames).then(|| (picture(out_frame), qnc_ui_text::text("story.still.after_out"))), moving_after: false };
@@ -141,13 +147,14 @@ impl ProgramSegments {
         let playhead = self.source.playing.filter(|(program, _, _)| !program).map_or(if taken { in_frame } else { last }, |(_, frame, _)| frame);
         let mut in_still = qnc_program_view::EditStill::new(in_frame, true, picture(in_frame)).labelled(&qnc_ui_text::text("story.still.in_first"));
         in_still.click = action("select_mark_in");
-        in_still.cut = taken;
+        in_still.cut = held && taken;
         let mut player = qnc_program_view::EditStill::new(playhead, true, picture(playhead)).labelled(&qnc_ui_text::text("zoom.player"));
         player.live = true; // the player itself, the monitor's picture as it plays
-        player.click = action("zoom_save");
+        // The player lets the mark go and puts the playhead on IN; the zoom stays.
+        player.click = Some(qnc_program_view::StillAction::new("zoom_save", None, Some(in_frame)));
         let mut out_still = qnc_program_view::EditStill::new(out_frame, false, picture(last)).labelled(&qnc_ui_text::text("story.still.out_last"));
         out_still.click = action("select_mark_out");
-        out_still.cut = !taken;
+        out_still.cut = held && !taken;
         vec![in_still, player, out_still]
     }
 
