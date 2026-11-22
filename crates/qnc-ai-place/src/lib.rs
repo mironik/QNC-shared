@@ -9,13 +9,13 @@ use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub const MODULE_ID: &str = "qnc.module.ai-place";
 /// The setting of this computer, beside its other settings.
 pub const FILE: &str = "ai-place.json";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct File {
     server: String,
@@ -102,6 +102,28 @@ pub fn server_of(root: &Path) -> Result<Option<AiServer>, String> {
     Ok(Some(AiServer { address: file.server, fingerprint: file.fingerprint, token: file.token }))
 }
 
+/// Writes the AI server of this computer (user 2026-11-22: "u Postavkama putanja Externog AI
+/// Agenta"): `None` removes the setting, so AI runs beside the application again. A server without
+/// its address, its fingerprint or its token is refused.
+pub fn set_server_of(root: &Path, server: Option<&AiServer>) -> Result<(), String> {
+    let path = qnc_dev_diagnostics::config_path(root).with_file_name(FILE);
+    let Some(server) = server else {
+        return match std::fs::remove_file(&path) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(format!("{}: {error}", path.display())),
+            _ => Ok(()),
+        };
+    };
+    let file = File { server: server.address.trim().into(), fingerprint: server.fingerprint.trim().into(), token: server.token.trim().into() };
+    if file.server.is_empty() || file.fingerprint.is_empty() || file.token.is_empty() {
+        return Err("an AI server needs its address, its fingerprint and its token".into());
+    }
+    if let Some(folder) = path.parent() {
+        std::fs::create_dir_all(folder).map_err(|error| format!("{}: {error}", folder.display()))?;
+    }
+    let text = serde_json::to_string_pretty(&file).map_err(|error| error.to_string())?;
+    std::fs::write(&path, text).map_err(|error| format!("{}: {error}", path.display()))
+}
+
 /// The AI server of this computer (the QNC root it runs in); none when AI runs here.
 pub fn server() -> Result<Option<AiServer>, String> {
     let root = qnc_dev_diagnostics::resolve_qnc_root().ok_or("no QNC root")?;
@@ -132,5 +154,17 @@ mod tests {
         assert!(super::server_of(root.path()).is_err());
         std::fs::write(&file, r#"{"server": "127.0.0.1:7843", "fingerprint": "ab", "token": "t"}"#).unwrap();
         assert_eq!(super::server_of(root.path()).unwrap().unwrap().address, "127.0.0.1:7843");
+    }
+
+    #[test]
+    fn the_server_written_is_read_back_and_none_removes_it() {
+        let root = tempfile::tempdir().unwrap();
+        let server = super::AiServer { address: "192.168.100.28:7843".into(), fingerprint: "ab".into(), token: "t".into() };
+        super::set_server_of(root.path(), Some(&server)).unwrap();
+        assert_eq!(super::server_of(root.path()).unwrap(), Some(server.clone()));
+        assert!(super::set_server_of(root.path(), Some(&super::AiServer { token: String::new(), ..server })).is_err());
+        super::set_server_of(root.path(), None).unwrap();
+        assert_eq!(super::server_of(root.path()).unwrap(), None);
+        super::set_server_of(root.path(), None).unwrap();
     }
 }
