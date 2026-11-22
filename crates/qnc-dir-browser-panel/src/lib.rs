@@ -29,6 +29,8 @@ pub struct BrowserStyle {
     pub focus: Color32,
     pub font_ui: f32,
     pub control_height: f32,
+    /// The space between the tabs of the sources (Computer, LAN, ...).
+    pub kind_gap: f32,
 }
 
 /// The words of the panel (from the form's text contract).
@@ -109,6 +111,7 @@ impl BrowserStyle {
             focus: theme.focus,
             font_ui: theme.font_ui,
             control_height: theme.chrome_control_height,
+            kind_gap: 10.0,
         }
     }
 }
@@ -132,13 +135,25 @@ pub fn show_with_confirm(
     labels: &BrowserLabels<'_>,
     bar: &ConfirmBar<'_>,
 ) -> Option<BrowserAnswer> {
+    show_with_confirm_spaced(ui, rect, (theme, pad, BrowserStyle::from_theme(theme).kind_gap), input, labels, bar)
+}
+
+/// [`show_with_confirm`] with the space between the tabs of the sources the form asks.
+pub fn show_with_confirm_spaced(
+    ui: &mut Ui,
+    rect: egui::Rect,
+    (theme, pad, kind_gap): (&qnc_desktop_theme::Theme, f32, f32),
+    input: BrowserInput<'_>,
+    labels: &BrowserLabels<'_>,
+    bar: &ConfirmBar<'_>,
+) -> Option<BrowserAnswer> {
     // The bar holds the buttons with the pad above and below them (user 2026-10-25: Cancel and
     // Select stood too low, cut off at the bottom of the panel).
     let bar_height = theme.chrome_control_height + 2.0 * pad;
     let bar_top = (rect.bottom() - bar_height).max(rect.top());
     let bar_rect = egui::Rect::from_min_size(egui::pos2(rect.left(), bar_top), Vec2::new(rect.width(), bar_height));
     let browser_rect = egui::Rect::from_min_max(rect.left_top(), egui::pos2(rect.right(), (bar_rect.top() - 8.0).max(rect.top())));
-    let style = BrowserStyle::from_theme(theme);
+    let style = BrowserStyle { kind_gap, ..BrowserStyle::from_theme(theme) };
     let asked = ui
         .scope_builder(egui::UiBuilder::new().max_rect(browser_rect), |ui| {
             let place = qnc_ui_kit::fill_block(ui, theme.bg);
@@ -194,7 +209,7 @@ pub fn show(ui: &mut Ui, input: BrowserInput<'_>, labels: &BrowserLabels<'_>, st
                 if response.clicked() && !selected {
                     action = Some(BrowserAction::Kind(index));
                 }
-                ui.add_space(10.0);
+                ui.add_space(style.kind_gap);
             }
         },
     );
