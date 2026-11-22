@@ -63,3 +63,17 @@ fn an_h264_delivery_has_a_constant_bitrate() {
         assert_eq!((after("-b:v"), after("-maxrate")), (Some("35M".to_string()), Some("35M".to_string())), "{encoder:?}");
     }
 }
+
+#[test]
+fn only_what_changes_the_picture_and_sound_changes_a_units_fingerprint() {
+    let base = export("h264", "progressive", 50.0);
+    let mut other_place = base.clone();
+    other_place["start_timecode"] = serde_json::json!("01:00:00:00");
+    other_place["directory"] = serde_json::json!("exports/elsewhere");
+    other_place["preset"] = serde_json::json!("my preset");
+    let fingerprint = |export: &Value| Delivery::from_export(export).unwrap().fingerprint(&unit());
+    assert_eq!(fingerprint(&base), fingerprint(&other_place), "the start timecode, folder and preset name keep the units");
+    let mut other_bitrate = base.clone();
+    other_bitrate["video_bitrate_mbps"] = serde_json::json!(50);
+    assert_ne!(fingerprint(&base), fingerprint(&other_bitrate), "another bitrate is another unit");
+}

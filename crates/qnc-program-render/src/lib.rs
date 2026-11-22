@@ -206,8 +206,22 @@ impl Delivery {
     /// What a unit is rendered in: the export block, the encoder and the unit's own
     /// format (a unit of another format is another file). The player matches the units
     /// of its story by this key.
+    /// Only what changes the picture and the sound of a unit is in it (audit 2026-11-22: the
+    /// whole export block was, so a new start timecode, export folder or preset name made every
+    /// unit again).
     pub fn key(&self) -> Value {
-        serde_json::json!({"export": self.saved, "encoder": self.encoder, "unit_format": UNIT_FORMAT})
+        let picture = serde_json::json!({
+            "video_codec": self.video_codec,
+            "width": self.width,
+            "height": self.height,
+            "fps": self.fps,
+            "interlaced": self.interlaced,
+            "top_first": self.top_first,
+            "audio_sample_rate": self.audio_sample_rate,
+            "audio_channels": self.audio_channels,
+            "video_bitrate_mbps": self.bitrate_mbps,
+        });
+        serde_json::json!({"delivery": picture, "encoder": self.encoder, "unit_format": UNIT_FORMAT})
     }
 
     /// The fingerprint of a unit rendered in this delivery and encoder.
