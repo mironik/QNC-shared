@@ -118,6 +118,13 @@ pub fn read(target: &ContentTarget, name: &str) -> Option<String> {
         .map(|entry| entry.value)
 }
 
+/// A pause decision only while the player prepares or plays, not while the user edits (a step,
+/// a mark): a copy and the records go on while the user cuts. Asks at most twice a second.
+pub fn playback_plays(target: ContentTarget) -> Arc<dyn Fn() -> bool + Send + Sync> {
+    let level = playback_level(target);
+    Arc::new(move || level() == PlaybackLevel::Playing)
+}
+
 /// A pause decision that asks the database at most twice a second.
 pub fn playback_pause(target: ContentTarget) -> Arc<dyn Fn() -> bool + Send + Sync> {
     let last: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
