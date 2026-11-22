@@ -268,7 +268,20 @@ fn the_fine_words_correct_the_rough_ones_and_keep_their_sentences() {
     let rough = [line(vec![w("Kad", 0, 10), w("je", 10, 20), w("jedna,", 20, 40)]), line(vec![w("Zagreb", 50, 70), w("promocija.", 80, 100)])];
     // The Croatian model: lower case, no punctuation, the right words, the missed "bila".
     let fine = [line(vec![w("kad", 0, 10), w("je", 10, 20), w("1969.", 21, 39), w("zagreb", 50, 70), w("bila", 71, 79), w("promocija", 80, 100)])];
-    let lines = corrected(&rough, &fine);
+    let lines = corrected(&rough, &fine, 50);
     let said: Vec<&str> = lines.iter().map(|line| line.text.as_str()).collect();
     assert_eq!(said, ["Kad je 1969.,", "Zagreb bila promocija."]);
+}
+
+#[test]
+fn a_fine_word_a_little_off_its_rough_one_overwrites_it_and_is_not_there_twice() {
+    let w = |text: &str, from: u64, to: u64| Word { from, to, text: text.into() };
+    let line = |words: Vec<Word>| Line { from: words[0].from, to: words.last().unwrap().to, text: words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" "), words };
+    // Parakeet heard "A bit će teško." the fine engine "a bit će teško" each word a little
+    // earlier, its "bit" inside Parakeet's "A"; and "tih 120" glued.
+    let rough = [line(vec![w("A", 0, 10), w("Bit", 10, 20), w("će", 20, 30), w("teško.", 30, 50)]), line(vec![w("Kroz", 60, 70), w("tih", 70, 80), w("sto,", 80, 100)])];
+    let fine = [line(vec![w("A", 0, 4), w("bit", 5, 9), w("će", 15, 25), w("tesko", 26, 46)]), line(vec![w("Kroz", 60, 70), w("tih120", 70, 100)])];
+    let lines = corrected(&rough, &fine, 50);
+    let said: Vec<&str> = lines.iter().map(|line| line.text.as_str()).collect();
+    assert_eq!(said, ["A Bit će tesko.", "Kroz tih 120,"]);
 }
