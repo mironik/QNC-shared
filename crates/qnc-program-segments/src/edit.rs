@@ -133,18 +133,20 @@ impl ProgramSegments {
             return if taken { in_cut.stills() } else { out_cut.stills() };
         }
         // A statement (user 2026-11-20): three windows, its IN picture, the player (the picture
-        // at the playhead) and its OUT picture; a click on IN or OUT puts the playhead there.
-        // The taken edge is the cut (its line in the sound); I or O moves it to the playhead.
-        let cue = |frame: u64| Some(qnc_program_view::StillAction::new("timeline_cue_frame", None, Some(frame)));
+        // at the playhead) and its OUT picture. A click on IN or OUT takes that mark and puts the
+        // playhead on it, as Ctrl+I / Ctrl+O; a click on the player lets go of the taken mark
+        // where it is (user 2026-11-22). The taken edge is the cut; I or O moves it to the playhead.
+        let action = |action: &str| Some(qnc_program_view::StillAction::new(action, None, None));
         let last = out_frame.saturating_sub(1).max(in_frame);
         let playhead = self.source.playing.filter(|(program, _, _)| !program).map_or(if taken { in_frame } else { last }, |(_, frame, _)| frame);
         let mut in_still = qnc_program_view::EditStill::new(in_frame, true, picture(in_frame)).labelled(&qnc_ui_text::text("story.still.in_first"));
-        in_still.click = cue(in_frame);
+        in_still.click = action("select_mark_in");
         in_still.cut = taken;
         let mut player = qnc_program_view::EditStill::new(playhead, true, picture(playhead)).labelled(&qnc_ui_text::text("zoom.player"));
         player.live = true; // the player itself, the monitor's picture as it plays
+        player.click = action("zoom_save");
         let mut out_still = qnc_program_view::EditStill::new(out_frame, false, picture(last)).labelled(&qnc_ui_text::text("story.still.out_last"));
-        out_still.click = cue(last);
+        out_still.click = action("select_mark_out");
         out_still.cut = !taken;
         vec![in_still, player, out_still]
     }

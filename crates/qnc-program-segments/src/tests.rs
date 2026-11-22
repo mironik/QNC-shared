@@ -1374,14 +1374,15 @@ fn a_statements_zoom_is_its_in_the_player_and_its_out_and_the_taken_edge_is_the_
     assert_eq!(frames(&segments), [(Some(10), false), (Some(39), false), (Some(39), true)]);
 }
 
-/// User 2026-11-20: a click on the IN picture puts the playhead on IN, on the OUT picture on OUT.
+/// User 2026-11-22: a click on the IN or OUT picture takes that mark (the playhead goes on it, as
+/// Ctrl+I / Ctrl+O), a click on the player lets go of the taken mark.
 #[test]
-fn a_click_on_the_in_or_out_picture_of_a_statements_zoom_puts_the_playhead_there() {
+fn a_click_on_the_in_or_out_picture_takes_the_mark_the_player_lets_it_go() {
     let mut segments = component();
     let mut pick = marked(10).with_statement(true).with_taken(Some(true));
     pick.marks = Some((10, 40));
     segments.set_source(pick);
     let clicks: Vec<_> = segments.view().source_edit_stills.iter().map(|still| still.click.as_ref().map(|click| (click.action.clone(), click.value))).collect();
-    let cue = |frame: i64| Some(("timeline_cue_frame".to_string(), Some(frame)));
-    assert_eq!(clicks, [cue(10), None, cue(39)]);
+    let take = |action: &str| Some((action.to_string(), None));
+    assert_eq!(clicks, [take("select_mark_in"), take("zoom_save"), take("select_mark_out")]);
 }
