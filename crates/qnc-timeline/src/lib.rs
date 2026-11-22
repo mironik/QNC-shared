@@ -1797,7 +1797,8 @@ fn paint_in_out_handles(
         if hovered == Some(is_in) {
             Stroke::new(3.0, input.theme.marker_hover)
         } else if input.focus == focus {
-            Stroke::new(3.0, input.theme.focus)
+            // A taken IN or OUT is red: the user sees it is being edited (user 2026-11-22).
+            Stroke::new(3.0, input.theme.cut)
         } else {
             Stroke::new(2.0, input.theme.text)
         }
