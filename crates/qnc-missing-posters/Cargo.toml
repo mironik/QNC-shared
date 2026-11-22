@@ -6,6 +6,7 @@ description = "QNC public block: the poster of a clip whose source has none, mad
 
 [dependencies]
 qnc-ui-text = { workspace = true }
+qnc-dev-diagnostics = { workspace = true }
 qnc-active-project-read = { workspace = true }
 qnc-content-read = { workspace = true }
 qnc-content-store = { workspace = true }

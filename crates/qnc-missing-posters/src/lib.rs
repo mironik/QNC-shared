@@ -96,6 +96,7 @@ pub fn make_missing_posters(
         .into_iter()
         .filter(|(_, poster)| !poster.as_deref().is_some_and(|uri| uri.starts_with(&in_project)))
         .collect();
+    let (started, wanted_count) = (std::time::Instant::now(), wanted.len());
     if wanted.is_empty() {
         return Ok(0);
     }
@@ -196,6 +197,8 @@ pub fn make_missing_posters(
             Err(error) => eprintln!("poster {clip_id}: {error}"),
         }
     }
+    // How long the posters took, for the log (user 2026-11-22: a card on the network).
+    qnc_dev_diagnostics::log_line(qnc_dev_diagnostics::DiagnosticsStream::Player, format!("posters wanted={wanted_count} made={made} ms={}", started.elapsed().as_millis()));
     Ok(made)
 }
 
