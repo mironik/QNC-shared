@@ -340,7 +340,8 @@ impl TimelineWaveService {
                 if clip.snapshot.phase != qnc_media_records::Phase::Final {
                     continue;
                 }
-                if self.jobs.is_ready(&clip.clip_id) {
+                // A clip that failed `TRIES` times is given up for this run.
+                if self.jobs.is_ready(&clip.clip_id) || self.jobs.gave_up(&clip.clip_id) {
                     continue;
                 }
                 order.insert(clip.clip_id.clone(), shooting_order(&clip.snapshot));
@@ -475,6 +476,9 @@ impl TimelineWaveService {
                             done.clip_id, matches_active, error
                         )
                     });
+                    if self.jobs.failed(&done.clip_id) {
+                        wave_log(|| format!("qnc-wave-worker: clip={} given_up", done.clip_id));
+                    }
                     if matches_active {
                         poll.active_error = Some(error);
                     }

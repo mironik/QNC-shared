@@ -320,7 +320,9 @@ impl TimelineFilmstripService {
                 .map(|clip| clip.clip_id.clone())
                 .ok_or_else(|| qnc_ui_text::text("filmstrip.filmstrip_content_page_empty").to_string())?;
             for clip in page {
-                if self.jobs.is_ready(&clip.clip_id) {
+                // A clip that failed `TRIES` times is given up for this run (it is no longer work
+                // waiting: the service ends instead of trying it until its time runs out).
+                if self.jobs.is_ready(&clip.clip_id) || self.jobs.gave_up(&clip.clip_id) {
                     continue;
                 }
                 if let Some(record) = context.content_reader.read_filmstrip(&clip.clip_id)? {
@@ -403,11 +405,15 @@ impl TimelineFilmstripService {
                 Err(error) if error == filmstrip_paused_for_playback() => {
                     self.enqueue(&done.clip_id, true);
                 }
-                Err(error) if matches_active => {
+                Err(error) => {
                     self.db_complete = false;
-                    poll.active_error = Some(error);
+                    if self.jobs.failed(&done.clip_id) {
+                        filmstrip_log(|| format!("qnc-filmstrip-worker: clip={} given_up error={error}", done.clip_id));
+                    }
+                    if matches_active {
+                        poll.active_error = Some(error);
+                    }
                 }
-                Err(_) => self.db_complete = false,
             }
         }
         self.start_next();

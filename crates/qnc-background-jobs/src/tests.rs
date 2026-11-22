@@ -172,3 +172,18 @@ fn the_queue_is_put_in_the_order_asked_and_runs_in_it() {
     });
     assert_eq!(*started.lock().unwrap(), ["long-new"], "one worker takes the first of the order");
 }
+
+#[test]
+fn a_clip_that_failed_twice_is_given_up_until_another_project() {
+    let mut jobs: Jobs<()> = Jobs::new("test", Preferred::Beside);
+    jobs.set_project("p");
+    assert!(!jobs.failed("broken"), "one failure is tried again");
+    assert!(jobs.enqueue("broken", false));
+    jobs.forget(&["broken".to_string()]);
+    jobs.failed("broken");
+    assert!(jobs.failed("broken"), "the second failure gives it up");
+    assert!(jobs.gave_up("broken"));
+    assert!(!jobs.enqueue("broken", false), "a clip given up is not queued again");
+    jobs.set_project("q");
+    assert!(!jobs.gave_up("broken"), "another project forgets it");
+}

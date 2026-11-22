@@ -5,13 +5,17 @@
 //! scenes and image vectors come as further jobs). What a job makes, and how it is read and
 //! written, belongs to its worker: this piece only schedules and runs the threads.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
 pub const MODULE_ID: &str = "qnc.module.background-jobs";
+
+/// How many times a clip's job may fail before it is given up for this run (a broken clip
+/// is not made again and again until the worker's time runs out).
+pub const TRIES: u32 = 2;
 
 /// How the clip open in a preview runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +58,8 @@ pub struct Jobs<O> {
     /// playing player).
     cap: Option<usize>,
     preferred: Option<String>,
+    /// How many times each clip's job failed (not a pause for the player).
+    failures: BTreeMap<String, u32>,
 }
 
 impl<O: Send + 'static> Jobs<O> {
@@ -69,6 +75,7 @@ impl<O: Send + 'static> Jobs<O> {
             playback: false,
             cap: None,
             preferred: None,
+            failures: BTreeMap::new(),
         }
     }
 
@@ -98,6 +105,7 @@ impl<O: Send + 'static> Jobs<O> {
         self.ready.clear();
         self.queue.clear();
         self.queued.clear();
+        self.failures.clear();
     }
 
     pub fn is_ready(&self, clip_id: &str) -> bool {
@@ -106,6 +114,19 @@ impl<O: Send + 'static> Jobs<O> {
 
     pub fn mark_ready(&mut self, clip_id: &str) {
         self.ready.insert(clip_id.to_string());
+    }
+
+    /// The clip's job failed (not a pause); true when it is now given up for this run.
+    pub fn failed(&mut self, clip_id: &str) -> bool {
+        let tries = self.failures.entry(clip_id.to_string()).or_insert(0);
+        *tries += 1;
+        *tries >= TRIES
+    }
+
+    /// The clip failed `TRIES` times in this run: it is not queued again until another project
+    /// or another run.
+    pub fn gave_up(&self, clip_id: &str) -> bool {
+        self.failures.get(clip_id).is_some_and(|tries| *tries >= TRIES)
     }
 
     pub fn is_running(&self, clip_id: &str) -> bool {
@@ -118,12 +139,13 @@ impl<O: Send + 'static> Jobs<O> {
         for clip_id in clip_ids {
             self.queued.remove(clip_id);
             self.ready.remove(clip_id);
+            self.failures.remove(clip_id);
         }
     }
 
     /// Queues a clip (first when `front`); false when it is done or runs.
     pub fn enqueue(&mut self, clip_id: &str, front: bool) -> bool {
-        if self.ready.contains(clip_id) || self.is_running(clip_id) {
+        if self.ready.contains(clip_id) || self.is_running(clip_id) || self.gave_up(clip_id) {
             return false;
         }
         if !self.queued.insert(clip_id.to_string()) {

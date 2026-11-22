@@ -6164,6 +6164,7 @@ dependencies = [
  "eframe",
  "qnc-action-event",
  "qnc-desktop-theme",
+ "qnc-dev-diagnostics",
  "qnc-edit-verbs",
  "qnc-program-view",
  "qnc-timeline",
