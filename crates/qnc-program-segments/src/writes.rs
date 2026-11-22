@@ -20,6 +20,13 @@ impl ProgramSegments {
                 origin: format!("draft:{}", segment.segment_id),
                 marks: segment.text_marks.clone(),
                 parts: segment.parts.clone(),
+                // An empty place (an OFF not read yet: an Off of its holder clip with A1 off from
+                // frame 0) goes as one again, as long as it is.
+                pause_millis: if segment.kind == "offovi" && segment.a1_off && segment.in_frame == 0 && segment.parts.is_empty() && segment.fps_num > 0 {
+                    segment.duration_frames * 1000 * u64::from(segment.fps_den) / u64::from(segment.fps_num)
+                } else {
+                    0
+                },
             })
             .collect();
         if segments.is_empty() {

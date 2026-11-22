@@ -17,7 +17,15 @@ impl Store {
                 (segment.a2.0, lane_level(segment.a2.1)?, segment.a2.2),
             ];
             let mut parts = segment.parts.clone();
-            let (range, rate, checked) = if parts.is_empty() {
+            let pause = segment.pause_millis > 0;
+            let sound = if pause { [(sound[0].0, sound[0].1, true), sound[1]] } else { sound };
+            let (range, rate, checked) = if pause {
+                // An empty place in story frames: its clip only holds it, as the pause of a
+                // compound statement does.
+                let story = story_rate(&self.conn)?.unwrap_or(rate);
+                let frames = ((segment.pause_millis as f64 / 1000.0) * f64::from(story.0) / f64::from(story.1)).round().max(1.0) as u64;
+                ((0, frames), story, false)
+            } else if parts.is_empty() {
                 ((segment.in_frame, segment.out_frame), rate, true)
             } else {
                 // A compound statement is one segment on its own axis, in story frames.

@@ -374,7 +374,7 @@ fn the_markers_of_an_off_text_are_m_markers_in_the_story_and_kept_with_the_segme
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("db");
     let mut store = imported_store(&path);
-    let off = AppendSegment { kind: "offovi".into(), clip_id: "c1".into(), in_frame: 100, out_frame: 150, a1: (0, 0, false), a2: (1, 0, true), origin: "script:2:0".into(), marks: vec![120], parts: Vec::new() };
+    let off = AppendSegment { kind: "offovi".into(), clip_id: "c1".into(), in_frame: 100, out_frame: 150, a1: (0, 0, false), a2: (1, 0, true), origin: "script:2:0".into(), marks: vec![120], parts: Vec::new(), pause_millis: 0 };
     run(&mut store, Operation::AppendSegments { project_id: "p1".into(), segments: vec![off] }).unwrap();
     assert_eq!(segments(&mut store).iter().find(|row| row.lead.is_empty()).unwrap().text_marks, [120]);
     let conn = Connection::open(&path).unwrap();
@@ -398,6 +398,7 @@ fn a_skeleton_is_appended_in_one_step_with_its_clips_rate_and_where_each_part_ca
         origin: origin.into(),
         marks: Vec::new(),
         parts: Vec::new(),
+        pause_millis: 0,
     };
     let segments_sent = vec![part("offovi", (100, 150), "script:2:0"), part("tonovi", (200, 260), "script:3:0")];
     run(&mut store, Operation::AppendSegments { project_id: "p1".into(), segments: segments_sent }).unwrap();
@@ -419,4 +420,29 @@ fn a_skeleton_is_appended_in_one_step_with_its_clips_rate_and_where_each_part_ca
     // A part that cannot be added leaves nothing of the skeleton behind.
     assert!(run(&mut store, Operation::AppendSegments { project_id: "p1".into(), segments: vec![part("tonovi", (0, 10), "a"), part("tonovi", (0, 200_000), "b")] }).is_err());
     assert_eq!(segments(&mut store).len(), 1);
+}
+
+#[test]
+fn an_off_not_read_yet_is_an_empty_place_of_its_reading_time_held_by_a_clip() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db");
+    let mut store = imported_store(&path);
+    create_segment(&mut store, "tonovi", (0, 50), (50, 1)).unwrap();
+    let pause = AppendSegment {
+        kind: "offovi".into(),
+        clip_id: "c1".into(),
+        in_frame: 0,
+        out_frame: 0,
+        a1: (0, 0, false),
+        a2: (1, 0, true),
+        origin: "script:4:pause".into(),
+        marks: Vec::new(),
+        parts: Vec::new(),
+        pause_millis: 60_000,
+    };
+    run(&mut store, Operation::AppendSegments { project_id: "p1".into(), segments: vec![pause] }).unwrap();
+    let rows = segments(&mut store);
+    let last = rows.last().unwrap();
+    assert_eq!((last.kind.as_str(), last.in_frame, last.out_frame, last.duration_frames), ("offovi", 0, 3000, 3000), "a minute at 50 frames, longer than its clip");
+    assert!(last.a1_off, "nothing of its clip is heard");
 }

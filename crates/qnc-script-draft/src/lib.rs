@@ -151,6 +151,9 @@ pub struct SkeletonPart {
     pub marks: Vec<u64>,
     /// The parts of a compound statement, which is one segment (user 2026-11-09); else empty.
     pub parts: Vec<PieceInput>,
+    /// An OFF not read yet (user 2026-11-22): an empty place of its reading time, in
+    /// milliseconds, held by the clip of a part beside it (nothing of that clip is seen or heard).
+    pub pause_millis: u64,
 }
 
 /// The seconds of a recording `seconds` long at which the M markers in the text of `block` fall;
@@ -219,7 +222,9 @@ fn mark_frames(block: &Block, take: &qnc_script_db::VoiceTake, fps: f64, frames:
 }
 
 /// The skeleton of `blocks`: the parts of the draft as story segments, in reading order. An OFF
-/// not recorded yet is left out (user 2026-10-31), as are blocks that do not count in the story.
+/// not recorded yet is an empty place of its reading time (user 2026-11-22, as in the draft XML),
+/// held by the clip of the part after it (else before it); blocks that do not count in the story
+/// are left out.
 pub fn skeleton(blocks: &[Block], voices: &[Voice], profile: &ScriptProfile, rates: &DraftRates<'_>) -> Result<Vec<SkeletonPart>, String> {
     if !(rates.fps.is_finite() && rates.fps > 0.0) {
         return Err(qnc_ui_text::text("voice.clip_rate").into());
@@ -243,6 +248,7 @@ pub fn skeleton(blocks: &[Block], voices: &[Voice], profile: &ScriptProfile, rat
                     origin: format!("script:{}:0", block.id),
                     marks: Vec::new(),
                     parts: if pieces.len() > 1 { pieces } else { Vec::new() },
+                    pause_millis: 0,
                 });
             }
             Role::Spoken => {
@@ -258,12 +264,37 @@ pub fn skeleton(blocks: &[Block], voices: &[Voice], profile: &ScriptProfile, rat
                         origin: format!("script:{}:0", block.id),
                         marks: mark_frames(block, take, place.fps, whole).into_iter().map(|frame| place.start + frame).collect(),
                         parts: Vec::new(),
+                        pause_millis: 0,
                     });
+                } else {
+                    let seconds = reading_seconds(&block.text, rates.words_per_second);
+                    if seconds > 0.0 {
+                        parts.push(SkeletonPart {
+                            kind: "offovi",
+                            clip_id: String::new(),
+                            from_frame: 0,
+                            to_frame: 0,
+                            a1: Some((None, 0, true)),
+                            origin: format!("script:{}:pause", block.id),
+                            marks: Vec::new(),
+                            parts: Vec::new(),
+                            pause_millis: (seconds * 1000.0).round() as u64,
+                        });
+                    }
                 }
             }
             Role::Anchor | Role::Note => {}
         }
     }
+    // An empty place is held by the clip of the part after it, else before it; with no clip at
+    // all there is nothing to hold it.
+    let holders: Vec<String> = parts.iter().map(|part| part.clip_id.clone()).collect();
+    for (index, part) in parts.iter_mut().enumerate() {
+        if part.pause_millis > 0 {
+            part.clip_id = holders[index + 1..].iter().chain(holders[..index].iter().rev()).find(|clip| !clip.is_empty()).cloned().unwrap_or_default();
+        }
+    }
+    parts.retain(|part| !part.clip_id.is_empty());
     if parts.is_empty() {
         return Err(qnc_ui_text::text("script.draft_empty").into());
     }

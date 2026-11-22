@@ -250,6 +250,10 @@ pub struct AppendSegment {
     /// are then a window on its axis; both 0 is all of it.
     #[serde(default)]
     pub parts: Vec<crate::CompoundPart>,
+    /// An OFF not read yet (user 2026-11-22): an empty place this many milliseconds long, black
+    /// and silent (an Off of `clip_id` with A1 off; nothing of the clip is seen or heard).
+    #[serde(default)]
+    pub pause_millis: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
