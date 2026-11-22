@@ -326,6 +326,7 @@ mod tests {
             b_roll,
             caption_name: String::new(),
             caption_role: String::new(),
+            parts: Vec::new(),
         };
         let target = ProjectDbTarget::from_owner_binding(std::path::Path::new("nowhere.db"), "qnc://local/db/project_db/p1").unwrap();
         let mut save = ShortSave::new();

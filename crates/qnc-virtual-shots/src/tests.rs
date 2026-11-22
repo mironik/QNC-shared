@@ -220,3 +220,21 @@ fn a_statement_keeps_its_in_and_out_as_timecode_and_a_trim_writes_them_anew() {
     trim_short_now(&target, &shot.shot_id, 16, 38, ("10:00:00:16", "10:00:00:38")).unwrap();
     assert_eq!(timecode(&dir.path().join("project.db")), ("10:00:00:16".into(), "10:00:00:38".into()));
 }
+
+#[test]
+fn a_statement_gets_parts_and_its_caption_kept_with_it() {
+    let (_dir, target) = project();
+    let shot = save(&target, "clip-a", (10, 40)).unwrap();
+    set_caption_now(&target, &shot.shot_id, "Ana Anić", "gradonačelnica").unwrap();
+    add_part_now(&target, &shot.shot_id, "clip-a", 60, 80).unwrap();
+    add_part_now(&target, &shot.shot_id, "clip-a", 90, 99).unwrap();
+    assert!(add_part_now(&target, &shot.shot_id, "clip-a", 50, 50).is_err(), "OUT after IN");
+    assert!(add_part_now(&target, "clip-a_shot_009", "clip-a", 1, 2).is_err(), "no such statement");
+    let listed = list_shorts(&target).unwrap();
+    let [shot] = listed.as_slice() else { panic!("one statement: {listed:?}") };
+    assert_eq!((shot.caption_name.as_str(), shot.caption_role.as_str()), ("Ana Anić", "gradonačelnica"));
+    let parts: Vec<(u64, u64)> = shot.parts.iter().map(|part| (part.in_frame, part.out_frame)).collect();
+    assert_eq!(parts, [(60, 80), (90, 99)], "the parts after its own IN/OUT, in order");
+    forget_short_now(&target, &shot.shot_id).unwrap();
+    assert!(list_shorts(&target).unwrap().is_empty());
+}
