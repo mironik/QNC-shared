@@ -37,6 +37,8 @@ pub type StreamMedia<'a> = dyn Fn(&str) -> Option<Box<dyn MediaBytes>> + 'a;
 const MXF_HEAD: u64 = 16 << 20;
 /// A card poster read through the transport is a small JPEG.
 const POSTER_BYTES: u64 = 16 << 20;
+/// How many posters of a card are copied at once.
+const COPIES_AT_ONCE: usize = 4;
 
 /// The project whose posters are brought in: its settings as read from its database.
 #[derive(Debug, Clone)]
@@ -111,20 +113,79 @@ pub fn make_missing_posters(
     let mut client = target.open(Access::ReadOnly)?;
     let mut writer = Writer::start(target, lease)?;
     let mut made = 0;
-    for (clip_id, card_poster) in wanted {
+    // The posters the card has are copied a few at a time (user 2026-11-22, a card on the network:
+    // each small file waits for the link, one after another 207 took minutes); each is written
+    // to the database as it is brought.
+    let (from_card, from_media): (Vec<_>, Vec<_>) = wanted.into_iter().partition(|(_, poster)| poster.is_some());
+    // Where each is on this computer and where it goes, found here (no copy yet); the copies run
+    // on the threads, a poster no file of this computer has is streamed after them.
+    let mut files = Vec::new();
+    let mut streamed = Vec::new();
+    for (clip_id, uri) in from_card.into_iter().filter_map(|(clip_id, poster)| poster.map(|uri| (clip_id, uri))) {
+        let output = poster_file(settings, &project_dir, &clip_id)?;
+        match local_media(&uri) {
+            Some(source) => files.push((clip_id, uri, source, output)),
+            None => streamed.push((clip_id, uri, output)),
+        }
+    }
+    let queue = std::sync::Mutex::new(files.into_iter());
+    let (brought_tx, brought_rx) = std::sync::mpsc::channel::<(String, String, PathBuf, Result<(), String>)>();
+    let copied = std::thread::scope(|scope| -> Result<usize, String> {
+        for _ in 0..COPIES_AT_ONCE {
+            let (queue, brought_tx) = (&queue, brought_tx.clone());
+            scope.spawn(move || loop {
+                if cancel.load(Ordering::Relaxed) {
+                    return;
+                }
+                let Some((clip_id, uri, source, output)) = queue.lock().unwrap_or_else(|e| e.into_inner()).next() else { return };
+                let brought = output
+                    .parent()
+                    .map_or(Ok(()), std::fs::create_dir_all)
+                    .and_then(|()| std::fs::copy(&source, &output).map(|_| ()))
+                    .map_err(|e| e.to_string());
+                if brought_tx.send((clip_id, uri, output, brought)).is_err() {
+                    return;
+                }
+            });
+        }
+        drop(brought_tx);
+        let mut copied = 0;
+        for (clip_id, uri, output, brought) in brought_rx {
+            match brought {
+                Ok(()) => {
+                    let poster = format!("{}/{clip_id}/poster.jpg", thumbnails_uri.trim_end_matches('/'));
+                    writer.set_poster(clip_id, poster)?;
+                    copied += 1;
+                }
+                Err(_) => streamed.push((clip_id, uri, output)),
+            }
+        }
+        Ok(copied)
+    })?;
+    made += copied;
+    for (clip_id, uri, output) in streamed {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        let brought = stream_media(&uri).map_or_else(|| Err(qnc_ui_text::text("import.source_clip_available_this_computer").to_string()), |mut media| copy_streamed_poster(&mut *media, &output));
+        match brought {
+            Ok(()) => {
+                let poster = format!("{}/{clip_id}/poster.jpg", thumbnails_uri.trim_end_matches('/'));
+                writer.set_poster(clip_id, poster)?;
+                made += 1;
+            }
+            Err(error) => eprintln!("poster {clip_id}: {error}"),
+        }
+    }
+    for (clip_id, _) in from_media {
         if cancel.load(Ordering::Relaxed) {
             break;
         }
         let output = poster_file(settings, &project_dir, &clip_id)?;
-        let brought = match card_poster {
-            Some(uri) => copy_card_poster(&uri, local_media, &output).or_else(|error| {
-                stream_media(&uri).map_or(Err(error), |mut media| copy_streamed_poster(&mut *media, &output))
-            }),
-            None => match client.read(&clip_id)? {
-                Some(clip) => poster_from_start(&clip, settings, local_media, &output, cancel)
-                    .or_else(|_| streamed_poster(&clip, settings, stream_media, &output, cancel)),
-                None => continue,
-            },
+        let brought = match client.read(&clip_id)? {
+            Some(clip) => poster_from_start(&clip, settings, local_media, &output, cancel)
+                .or_else(|_| streamed_poster(&clip, settings, stream_media, &output, cancel)),
+            None => continue,
         };
         match brought {
             Ok(()) => {
