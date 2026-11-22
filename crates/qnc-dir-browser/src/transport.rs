@@ -6,6 +6,9 @@ use std::{collections::BTreeMap, fmt, sync::Arc};
 pub struct BrowserSource {
     pub entry: BrowserEntry,
     private_local_root: Option<std::path::PathBuf>,
+    /// The tab (environment) the source is shown under when it is not its URI's: a card of this
+    /// computer read over the network is shown under LAN (user 2026-11-22).
+    tab: Option<String>,
     connect: Arc<dyn Fn() -> Result<SourceReader, String> + Send + Sync>,
 }
 
@@ -27,12 +30,19 @@ impl BrowserSource {
         Self {
             entry,
             private_local_root: None,
+            tab: None,
             connect: Arc::new(connect),
         }
     }
 
     pub fn with_private_local_root(mut self, root: impl Into<std::path::PathBuf>) -> Self {
         self.private_local_root = Some(root.into());
+        self
+    }
+
+    /// Shows the source under tab `environment` (`local`, `lan`, `intranet`) whatever its URI says.
+    pub fn on_tab(mut self, environment: &str) -> Self {
+        self.tab = Some(environment.into());
         self
     }
 }
@@ -71,7 +81,11 @@ impl TransportBrowserSession {
         let mut entries = Vec::new();
         for source in &self.sources {
             let uri = &source.entry.qnc_uri;
-            if qnc_contracts::parse_qnc_uri(uri)?.environment == environment {
+            let tab = match &source.tab {
+                Some(tab) => tab.clone(),
+                None => qnc_contracts::parse_qnc_uri(uri)?.environment,
+            };
+            if tab == environment {
                 self.visible.insert(
                     uri.clone(),
                     SourceReference::new(uri, ".").map_err(|e| e.to_string())?,
