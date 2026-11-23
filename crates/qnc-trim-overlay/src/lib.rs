@@ -84,7 +84,8 @@ pub fn show(ctx: &egui::Context, segments: &SegmentsView, theme: &TimelineTheme)
             for (index, still) in stills.iter().enumerate() {
                 let left = top.x + index as f32 * (picture.x + GAP);
                 let pane = Rect::from_min_size(egui::pos2(left, top.y), picture);
-                let in_focus = focus.map_or(still.cut, |side| still.after == side);
+                // The player in the middle of a zoom is no side of the cut.
+                let in_focus = !still.live && focus.map_or(still.cut, |side| still.after == side);
                 paint_still(ui, pane, still, in_focus, &visuals, theme);
                 // A left click on a picture or on its strip picks its side of the cut and never
                 // closes the zoom (user 2026-11-05: "a left click on the picture closed the zoom, it
@@ -121,10 +122,12 @@ pub fn show(ctx: &egui::Context, segments: &SegmentsView, theme: &TimelineTheme)
                     }
                 }
                 // The marker lies between the picture before it and the one after it.
-                if still.after && index > 0 && !stills[index - 1].after {
+                // (the player in the middle is passed over: the cut lies between the two sides)
+                let previous = stills[..index].iter().rev().find(|still| !still.live);
+                if !still.live && still.after && previous.is_some_and(|previous| !previous.after) {
                     let x = left - GAP / 2.0;
                     // The cut's line goes through the gap at the taken cut (four pictures: two gaps).
-                    if !gap_at_cut && (still.cut || stills[index - 1].cut) {
+                    if !gap_at_cut && (still.cut || previous.is_some_and(|previous| previous.cut)) {
                         (gap_at, gap_at_cut) = (Some(x), true);
                     }
                     gap_at.get_or_insert(x);
