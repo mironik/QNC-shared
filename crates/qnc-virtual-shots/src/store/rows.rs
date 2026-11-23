@@ -96,11 +96,11 @@ pub(crate) fn with_parts(conn: &Connection, mut shots: Vec<ShortClip>) -> Result
         return Ok(shots);
     }
     let mut statement = conn
-        .prepare("SELECT clip_id, in_frame, out_frame FROM virtual_shot_parts WHERE shot_id = ?1 ORDER BY part_index")
+        .prepare("SELECT clip_id, in_frame, out_frame, join_kind FROM virtual_shot_parts WHERE shot_id = ?1 ORDER BY part_index")
         .map_err(err)?;
     for shot in &mut shots {
         shot.parts = statement
-            .query_map([&shot.shot_id], |row| Ok(ShotPart { clip_id: row.get(0)?, in_frame: row.get::<_, i64>(1)?.max(0) as u64, out_frame: row.get::<_, i64>(2)?.max(0) as u64 }))
+            .query_map([&shot.shot_id], |row| Ok(ShotPart { clip_id: row.get(0)?, in_frame: row.get::<_, i64>(1)?.max(0) as u64, out_frame: row.get::<_, i64>(2)?.max(0) as u64, join: JoinKind::of(&row.get::<_, String>(3)?).unwrap_or_default() }))
             .map_err(err)?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(err)?;

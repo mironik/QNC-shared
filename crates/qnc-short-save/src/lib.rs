@@ -36,7 +36,22 @@ pub struct ShortSave {
     timecode: Option<(String, qnc_source_timecode::SourceTimecode)>,
     /// A new statement waiting for its caption (user 2026-11-19).
     captioning: Option<Writing>,
+    /// A part waiting for how it joins the part before it (user 2026-11-23).
+    joining: Option<Joining>,
 }
+
+/// A part of a statement asked about: the statement, the clip and IN/OUT, the database.
+#[derive(Debug, Clone)]
+struct Joining {
+    shot_id: String,
+    clip_id: String,
+    marks: (u64, u64),
+    target: ProjectDbTarget,
+}
+
+/// How the part joins the one before it chosen (target: `cut`, `smooth`, `blic`), or given up.
+pub const JOIN: &str = "statement_join";
+pub const JOIN_CANCEL: &str = "statement_join_cancel";
 
 /// The catalog actions of the question "the same statement is already there".
 pub const OVERWRITE: &str = "statement_overwrite";
@@ -129,17 +144,24 @@ impl ShortSave {
     /// Adds the shown clip's IN/OUT as a part of the chosen statement, in the background.
     pub fn add_part(&mut self, open: Option<OpenShort<'_>>, shown_clip: Option<&str>, marks: Option<(u64, u64)>, target: Option<&ProjectDbTarget>) -> bool {
         let (true, Some((shot, _, _)), Some(clip), Some(cut), Some(target), None) = (can_add_part(open, shown_clip, marks), open, shown_clip, marks, target, &self.pending) else { return true };
-        log(&format!("short-save part {shot} {clip} {cut:?}"));
-        let (target, shot, clip_id) = (target.clone(), shot.to_string(), clip.to_string());
+        // How it joins the part before it is asked first (user 2026-11-23: Cut, Smooth or Blic,
+        // "odmah pri dodavanju"); nothing is written until it is answered.
+        self.joining = Some(Joining { shot_id: shot.to_string(), clip_id: clip.to_string(), marks: cut, target: target.clone() });
+        true
+    }
+
+    /// Writes the part asked about with the join chosen, in the background.
+    fn write_part(&mut self, joining: Joining, join: qnc_virtual_shots::JoinKind) {
+        let Joining { shot_id: shot, clip_id, marks: cut, target } = joining;
+        log(&format!("short-save part {shot} {clip_id} {cut:?} join={}", join.code()));
         let (sender, receiver) = mpsc::channel();
         let started = std::thread::Builder::new().name("qnc-short-part".into()).spawn(move || {
-            let added = qnc_virtual_shots::add_part_now(&target, &shot, &clip_id, cut.0, cut.1).map(|_| Saved { shot_id: shot, clip_id, marks: cut, part: true });
+            let added = qnc_virtual_shots::add_part_now(&target, &shot, &clip_id, cut.0, cut.1, join).map(|_| Saved { shot_id: shot, clip_id, marks: cut, part: true });
             let _ = sender.send(added);
         });
         if started.is_ok() {
             self.pending = Some(receiver);
         }
-        true
     }
 
     pub fn update(&mut self, open: Option<OpenShort<'_>>, shown_clip: Option<&str>, marks: Option<(u64, u64)>, target: Option<&ProjectDbTarget>) -> bool {
@@ -219,6 +241,22 @@ impl ShortSave {
     /// Cancel (user 2026-11-01); while a new one waits for its caption: who speaks and their role.
     pub fn question(&self) -> Option<qnc_notice::Choice> {
         let option = |action_id: &str, code: &'static str, strong| qnc_notice::ChoiceOption::new(action_id, text(code), strong);
+        if self.joining.is_some() {
+            let join = |kind: qnc_virtual_shots::JoinKind, code: &'static str| option(JOIN, code, kind == qnc_virtual_shots::JoinKind::Cut).with_target(kind.code());
+            return Some(qnc_notice::Choice {
+                title: text("statement.join_title"),
+                message: text("statement.join_message"),
+                items: Vec::new(),
+                solution: String::new(),
+                options: vec![
+                    option(JOIN_CANCEL, "common.cancel", false),
+                    join(qnc_virtual_shots::JoinKind::Blic, "statement.join_blic"),
+                    join(qnc_virtual_shots::JoinKind::Smooth, "statement.join_smooth"),
+                    join(qnc_virtual_shots::JoinKind::Cut, "statement.join_cut"),
+                ],
+                fields: Vec::new(),
+            });
+        }
         if let Some(writing) = &self.captioning {
             let field = |code: &'static str, value: &str| qnc_notice::ChoiceField { label: text(code), value: value.to_string() };
             return Some(qnc_notice::Choice {
@@ -246,6 +284,14 @@ impl ShortSave {
     /// writes the statement already there again (its IN/OUT and stills made anew), never a
     /// second one; Cancel leaves it.
     pub fn answer(&mut self, action_id: &str, target: Option<&str>) -> bool {
+        // How a part joins the one before it: written with the kind chosen, or nothing.
+        if action_id == JOIN || action_id == JOIN_CANCEL {
+            let Some(joining) = self.joining.take() else { return true };
+            if let (JOIN, Some(join)) = (action_id, target.and_then(qnc_virtual_shots::JoinKind::of)) {
+                self.write_part(joining, join);
+            }
+            return true;
+        }
         // The caption of a new statement: Save writes it with what was written, Cancel writes nothing.
         if action_id == CAPTION_SAVE || action_id == CAPTION_CANCEL {
             let Some(mut writing) = self.captioning.take() else { return true };
@@ -323,6 +369,19 @@ mod tests {
         assert!(changed(open, Some("c"), Some((12, 20))));
         assert!(!changed(open, Some("other"), Some((12, 20))));
         assert!(!changed(None, Some("c"), Some((12, 20))));
+    }
+
+    #[test]
+    fn a_part_asks_how_it_joins_first_cut_proposed_and_cancel_writes_nothing() {
+        let target = ProjectDbTarget::from_owner_binding(std::path::Path::new("nowhere.db"), "qnc://local/db/project_db/p1").unwrap();
+        let mut save = ShortSave::new();
+        assert!(save.add_part(Some(("s", "c", (10, 20))), Some("c"), Some((30, 40)), Some(&target)));
+        let asked = save.question().expect("the join is asked before anything is written");
+        assert!(save.pending.is_none(), "nothing written before the answer");
+        let options: Vec<(&str, Option<&str>, bool)> = asked.options.iter().map(|o| (o.action_id.as_str(), o.target.as_deref(), o.strong)).collect();
+        assert_eq!(options, [(JOIN_CANCEL, None, false), (JOIN, Some("blic"), false), (JOIN, Some("smooth"), false), (JOIN, Some("cut"), true)]);
+        assert!(save.answer(JOIN_CANCEL, None));
+        assert!(save.question().is_none() && save.pending.is_none(), "Cancel writes no part");
     }
 
     #[test]

@@ -116,6 +116,9 @@ pub enum Operation {
         clip_id: String,
         in_frame: u64,
         out_frame: u64,
+        /// How it joins the part before it.
+        #[serde(default)]
+        join: JoinKind,
     },
     /// The caption of a statement (user 2026-11-19): who speaks and their role, for the director.
     SetCaption {
@@ -401,11 +404,41 @@ pub struct ShotPart {
     pub clip_id: String,
     pub in_frame: u64,
     pub out_frame: u64,
+    /// How it joins the part before it.
+    #[serde(default)]
+    pub join: JoinKind,
+}
+
+/// How a part of a statement joins the part before it (user 2026-11-23: "rez se može napraviti
+/// SMOOTH, BLIC, CAT"): a cut, in-between pictures (Smooth) or a white flash (Blic).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JoinKind {
+    #[default]
+    Cut,
+    Smooth,
+    Blic,
+}
+
+impl JoinKind {
+    /// Its code in the database and in actions.
+    pub fn code(self) -> &'static str {
+        match self {
+            JoinKind::Cut => "cut",
+            JoinKind::Smooth => "smooth",
+            JoinKind::Blic => "blic",
+        }
+    }
+
+    /// The kind of `code`; `None` for any other.
+    pub fn of(code: &str) -> Option<Self> {
+        [JoinKind::Cut, JoinKind::Smooth, JoinKind::Blic].into_iter().find(|kind| kind.code() == code)
+    }
 }
 
 /// Adds the part `[in_frame, out_frame)` of `clip_id` to statement `shot_id`, written and waited for.
-pub fn add_part_now(target: &ProjectDbTarget, shot_id: &str, clip_id: &str, in_frame: u64, out_frame: u64) -> Result<()> {
-    let operation = Operation::AddPart { shot_id: shot_id.into(), clip_id: clip_id.into(), in_frame, out_frame };
+pub fn add_part_now(target: &ProjectDbTarget, shot_id: &str, clip_id: &str, in_frame: u64, out_frame: u64, join: JoinKind) -> Result<()> {
+    let operation = Operation::AddPart { shot_id: shot_id.into(), clip_id: clip_id.into(), in_frame, out_frame, join };
     match VirtualShotsWriter::start(target.clone())?.call(&operation)? {
         Data::Changed => Ok(()),
         _ => Err(wrong()),

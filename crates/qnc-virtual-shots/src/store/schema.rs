@@ -49,6 +49,8 @@ pub(crate) fn ensure_virtual_shots_schema(conn: &Connection) -> Result<()> {
     // IN and OUT as the camera's timecode (user 2026-11-20: "time kod je jedino mjerilo").
     add_virtual_column_if_missing(conn, "tc_in", "TEXT NOT NULL DEFAULT ''")?;
     add_virtual_column_if_missing(conn, "tc_out", "TEXT NOT NULL DEFAULT ''")?;
+    // How each part joins the one before it (user 2026-11-23: "rez se može napraviti SMOOTH, BLIC, CAT").
+    add_column_if_missing(conn, "virtual_shot_parts", "join_kind", "TEXT NOT NULL DEFAULT 'cut'")?;
     conn.execute_batch(
         "DROP VIEW IF EXISTS public_short_clips;
         CREATE VIEW public_short_clips AS
@@ -67,8 +69,12 @@ pub(crate) fn ensure_virtual_shots_schema(conn: &Connection) -> Result<()> {
 }
 
 pub(crate) fn add_virtual_column_if_missing(conn: &Connection, column: &str, definition: &str) -> Result<()> {
+    add_column_if_missing(conn, "virtual_shots", column, definition)
+}
+
+pub(crate) fn add_column_if_missing(conn: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
     let mut statement = conn
-        .prepare("PRAGMA table_info(virtual_shots)")
+        .prepare(&format!("PRAGMA table_info({table})"))
         .map_err(err)?;
     let columns = statement
         .query_map([], |row| row.get::<_, String>(1))
@@ -79,7 +85,7 @@ pub(crate) fn add_virtual_column_if_missing(conn: &Connection, column: &str, def
         return Ok(());
     }
     conn.execute_batch(&format!(
-        "ALTER TABLE virtual_shots ADD COLUMN {column} {definition}"
+        "ALTER TABLE {table} ADD COLUMN {column} {definition}"
     ))
     .map_err(err)
 }

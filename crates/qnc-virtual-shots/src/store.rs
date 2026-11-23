@@ -73,7 +73,7 @@ impl Store {
             }
             Operation::TrimShort { shot_id, in_frame, out_frame, tc_in, tc_out } => self.trim_short(shot_id, *in_frame, *out_frame, (tc_in, tc_out)),
             Operation::SetCaption { shot_id, caption_name, caption_role } => self.set_caption(shot_id, caption_name, caption_role),
-            Operation::AddPart { shot_id, clip_id, in_frame, out_frame } => self.add_part(shot_id, clip_id, *in_frame, *out_frame),
+            Operation::AddPart { shot_id, clip_id, in_frame, out_frame, join } => self.add_part(shot_id, clip_id, *in_frame, *out_frame, *join),
             Operation::ListShorts => self.list_shorts(),
             Operation::ListBroll => self.list_b_roll(),
             Operation::MarkShortStills {
@@ -310,7 +310,7 @@ impl Store {
         Ok(Data::Changed)
     }
 
-    fn add_part(&mut self, shot_id: &str, clip_id: &str, in_frame: u64, out_frame: u64) -> Result<Data> {
+    fn add_part(&mut self, shot_id: &str, clip_id: &str, in_frame: u64, out_frame: u64, join: JoinKind) -> Result<Data> {
         if out_frame <= in_frame {
             return Err(qnc_ui_text::text("story.out_after_in").into());
         }
@@ -321,7 +321,7 @@ impl Store {
         require_imported_clip(&self.conn, clip_id)?;
         let next: i64 = self.conn.query_row("SELECT coalesce(max(part_index), 0) + 1 FROM virtual_shot_parts WHERE shot_id = ?1", [shot_id], |row| row.get(0)).map_err(err)?;
         self.conn
-            .execute("INSERT INTO virtual_shot_parts (shot_id, part_index, clip_id, in_frame, out_frame) VALUES (?1, ?2, ?3, ?4, ?5)", params![shot_id, next, clip_id, in_frame as i64, out_frame as i64])
+            .execute("INSERT INTO virtual_shot_parts (shot_id, part_index, clip_id, in_frame, out_frame, join_kind) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![shot_id, next, clip_id, in_frame as i64, out_frame as i64, join.code()])
             .map_err(err)?;
         Ok(Data::Changed)
     }
